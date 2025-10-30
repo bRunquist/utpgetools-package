@@ -651,34 +651,49 @@ def echometer_fl_bhp(PBU_time, travel_time, deltap, API, gamma_g, gamma_w, tempe
     
     The function prints intermediate calculations and equations at each step for transparency and validation.
     
-    Inputs:
-    -------
-    PBU_time : float
-        Pressure buildup time (seconds) - time the well is shut in for the PBU test
-    travel_time : float
-        Acoustic travel time (seconds) - time for sound to travel down to fluid level and back up
-    deltap : float
-        Pressure buildup during test (psi) - pressure increase observed during the acoustic shot
-    API : float
-        Oil API gravity (degrees API) - used to calculate oil specific gravity
-    gamma_g : float
-        Gas specific gravity (dimensionless, relative to air) - used for gas property calculations
-    gamma_w : float
-        Water specific gravity (dimensionless, relative to water) - typically around 1.0-1.1
-    temperature_f : float
-        Temperature (degrees Fahrenheit) - wellbore temperature for gas property calculations
-    psa : float
-        Shut-in annulus pressure / surface separator pressure (psia) - reference pressure at surface
-    WOR : float
-        Water-to-oil ratio (dimensionless) - volumetric ratio of water to oil production
-    TVD : float
-        Well true vertical depth (feet) - total vertical depth of the well
-    
+    Args:
+        PBU_time (float): 
+            Pressure buildup time in seconds. Time the well is shut in for the PBU test.
+        
+        travel_time (float): 
+            Acoustic travel time in seconds. Time for sound to travel down to 
+            fluid level and back up.
+        
+        deltap (float): 
+            Pressure buildup during test in psi. Pressure increase observed 
+            during the acoustic shot.
+        
+        API (float): 
+            Oil API gravity in degrees API. Used to calculate oil specific gravity.
+        
+        gamma_g (float): 
+            Gas specific gravity, dimensionless relative to air. Used for gas 
+            property calculations.
+        
+        gamma_w (float): 
+            Water specific gravity, dimensionless relative to water. Typically 
+            around 1.0-1.1.
+        
+        temperature_f (float): 
+            Temperature in degrees Fahrenheit. Wellbore temperature for gas 
+            property calculations.
+        
+        psa (float): 
+            Shut-in annulus pressure / surface separator pressure in psia. 
+            Reference pressure at surface.
+        
+        WOR (float): 
+            Water-to-oil ratio, dimensionless. Volumetric ratio of water to 
+            oil production.
+        
+        TVD (float): 
+            Well true vertical depth in feet. Total vertical depth of the well.
+
     Returns:
-    --------
-    tuple : (float, float)
-        - Fluid level (feet) : Distance from surface to fluid interface
-        - BHP (psia) : Calculated bottomhole pressure
+        tuple: A tuple containing two calculated values:
+        
+            fluid_level (float): Distance from surface to fluid interface in feet.
+            BHP (float): Calculated bottomhole pressure in psia.
     
     Process Overview:
     -----------------
@@ -777,29 +792,35 @@ def gas_valve_depths(Pinj, pwh, Gk, Gg, Pdt, Gdt, packer_depth, Kickoff=None):
     """
     Calculate the Required depths for gas lift valves in a well.
 
-    Inputs:
-    -------
-    Pinj : float
-        Injection pressure at the surface (psi).
-    pwh : float
-        Wellhead pressure (psi).
-    Gk : float
-        Kill fluid gradient (psi/ft). 0.433 for water
-    Gg : float
-        Gas gradient in the annulus (psi/ft).
-    Pdt : float
-        Design discharge pressure (psi).
-    Gdt : float
-        Pressure gradient for unloading
-    packer_depth : float
-        Depth of the packer (ft).
-    Kickoff : float, optional
-        Kickoff pressure (psi). If None, uses Pinj for initial pressure.
+    Args:
+        Pinj (float): 
+            Injection pressure at the surface in psi.
+        
+        pwh (float): 
+            Wellhead pressure in psi.
+        
+        Gk (float): 
+            Kill fluid gradient in psi/ft. Typically 0.433 for water.
+        
+        Gg (float): 
+            Gas gradient in the annulus in psi/ft.
+        
+        Pdt (float): 
+            Design discharge pressure in psi.
+        
+        Gdt (float): 
+            Pressure gradient for unloading in psi/ft.
+        
+        packer_depth (float): 
+            Depth of the packer in ft.
+        
+        Kickoff (float, optional): 
+            Kickoff pressure in psi. If None, uses Pinj for initial pressure.
 
     Returns:
-    --------
-    valve_depths : list of float
-        List of calculated valve depths (ft).
+        list: A list containing calculated valve depths.
+        
+            valve_depths (list of float): List of calculated valve depths in ft.
 
     """
     valve_depths = []
@@ -831,28 +852,36 @@ def plunger_rate_calculation(TD, t_blowdown, WOR, tubing_ID, slug_height, loss_f
     """
     Calculate plunger cycle time, slug volume, production rate, and Required compressor pressure.
 
-    Inputs:
-    -------
-    TD : float
-        Total depth of the well (ft).
-    t_blowdown : float
-        Blowdown time (minutes).
-    WOR : float
-        Water-oil ratio (dimensionless).
-    tubing_ID : float
-        Inner diameter of the tubing (inches).
-    slug_height : float
-        Height of the fluid slug (ft).
-    loss_fraction : float
-        Percentage loss per thousand ft as a decimal.
-    pt : float
-        Tubing pressure at the surface (psia).
-    Wp : float
-        Weight of the plunger (lbs).
-    oil_API : float
-        Oil API gravity (degrees API).
-    water_gravity : float
-        Water specific gravity (dimensionless).
+    Args:
+        TD (float): 
+            Total depth of the well in ft.
+        
+        t_blowdown (float): 
+            Blowdown time in minutes.
+        
+        WOR (float): 
+            Water-oil ratio, dimensionless.
+        
+        tubing_ID (float): 
+            Inner diameter of the tubing in inches.
+        
+        slug_height (float): 
+            Height of the fluid slug in ft.
+        
+        loss_fraction (float): 
+            Percentage loss per thousand ft as a decimal.
+        
+        pt (float): 
+            Tubing pressure at the surface in psia.
+        
+        Wp (float): 
+            Weight of the plunger in lbs.
+        
+        oil_API (float): 
+            Oil API gravity in degrees API.
+        
+        water_gravity (float): 
+            Water specific gravity, dimensionless.
     """
 
     t_rise = TD / 750 # minutes to rise
@@ -936,57 +965,85 @@ def pcp_design(API,
     All intermediate calculations and equations are printed to console with color formatting for 
     clear visualization of the design process and results.
     
-    Inputs:
-    -----------
-    API : float
-        Oil API gravity (degrees API) - used to calculate oil specific gravity and properties
-    gas_gravity : float
-        Gas specific gravity (dimensionless, relative to air) - for gas property calculations
-    water_gravity : float
-        Water specific gravity (dimensionless, relative to water) - typically 1.0-1.1
-    GLR : float
-        Gas-to-liquid ratio (scf/stb) - total gas production per stock tank barrel of liquid
-    WOR : float
-        Water-to-oil ratio (dimensionless) - volumetric ratio of water to oil production
-    pwf : float
-        Wellbore flowing pressure at pump intake (psia) - bottomhole flowing pressure
-    BHT : float
-        Bottomhole temperature (degrees Fahrenheit) - temperature at pump depth
-    tubing_ID : float
-        Tubing internal diameter (inches) - production tubing inner diameter
-    rod_diameter : float
-        Rod diameter (inches) - PCP drive rod diameter
-    Wr : float
-        Rod weight per unit length (lbf/ft) - weight of rod string per foot
-    pump_depth_ft : float
-        Pump setting depth (feet) - vertical depth where pump is installed
-    oil_rate : float
-        Oil production rate (STB/D) - stock tank barrels of oil per day
-    liquid_rate : float
-        Total liquid production rate (STB/D) - oil plus water production rate
-    pump_capacity : float
-        Pump capacity (bbl/d/rpm) - volumetric displacement per revolution per rpm
-    rotor_diameter : float
-        Pump rotor diameter (inches) - diameter of the PCP rotor
-    separator_pressure : float, default 100
-        Separator pressure (psia) - surface separation pressure for property calculations
-    separator_temperature : float, default 100
-        Separator temperature (degrees Fahrenheit) - surface separation temperature
-    pump_efficiency : float, optional
-        Pump volumetric efficiency (decimal) - if None, function prompts for input after discharge pressure calculation
-    t_surface : float, optional
-        Surface temperature (degrees Fahrenheit) - if None, uses separator_temperature
-    wellhead_pressure : float, optional
-        Wellhead pressure (psia) - if None, uses separator_pressure
-    bearing_load_rating : float, default 50500
-        Bearing load rating (lbf) - manufacturer's bearing capacity rating
-    lifetime_revolutions : float, default 90e6
-        Expected bearing lifetime (revolutions) - total revolutions for bearing life calculation
+    Args:
+        API (float): 
+            Oil API gravity in degrees API. Used to calculate oil specific gravity 
+            and properties.
+        
+        gas_gravity (float): 
+            Gas specific gravity, dimensionless relative to air. For gas property 
+            calculations.
+        
+        water_gravity (float): 
+            Water specific gravity, dimensionless relative to water. Typically 1.0-1.1.
+        
+        GLR (float): 
+            Gas-to-liquid ratio in scf/stb. Total gas production per stock tank 
+            barrel of liquid.
+        
+        WOR (float): 
+            Water-to-oil ratio, dimensionless. Volumetric ratio of water to oil 
+            production.
+        
+        pwf (float): 
+            Wellbore flowing pressure at pump intake in psia. Bottomhole flowing 
+            pressure.
+        
+        BHT (float): 
+            Bottomhole temperature in degrees Fahrenheit. Temperature at pump depth.
+        
+        tubing_ID (float): 
+            Tubing internal diameter in inches. Production tubing inner diameter.
+        
+        rod_diameter (float): 
+            Rod diameter in inches. PCP drive rod diameter.
+        
+        Wr (float): 
+            Rod weight per unit length in lbf/ft. Weight of rod string per foot.
+        
+        pump_depth_ft (float): 
+            Pump setting depth in feet. Vertical depth where pump is installed.
+        
+        oil_rate (float): 
+            Oil production rate in STB/D. Stock tank barrels of oil per day.
+        
+        liquid_rate (float): 
+            Total liquid production rate in STB/D. Oil plus water production rate.
+        
+        pump_capacity (float): 
+            Pump capacity in bbl/d/rpm. Volumetric displacement per revolution per rpm.
+        
+        rotor_diameter (float): 
+            Pump rotor diameter in inches. Diameter of the PCP rotor.
+        
+        separator_pressure (float, default=100): 
+            Separator pressure in psia. Surface separation pressure for property 
+            calculations.
+        
+        separator_temperature (float, default=100): 
+            Separator temperature in degrees Fahrenheit. Surface separation 
+            temperature.
+        
+        pump_efficiency (float, optional): 
+            Pump volumetric efficiency as decimal. If None, function prompts for 
+            input after discharge pressure calculation.
+        
+        t_surface (float, optional): 
+            Surface temperature in degrees Fahrenheit. If None, uses 
+            separator_temperature.
+        
+        wellhead_pressure (float, optional): 
+            Wellhead pressure in psia. If None, uses separator_pressure.
+        
+        bearing_load_rating (float, default=50500): 
+            Bearing load rating in lbf. Manufacturer's bearing capacity rating.
+        
+        lifetime_revolutions (float, default=90e6): 
+            Expected bearing lifetime in revolutions. Total revolutions for bearing 
+            life calculation.
     
     Returns:
-    --------
-    None
-        Function prints all results to console and does not return values
+        None: Function prints all results to console and does not return values.
     
     Calculations Performed:
     -----------------------

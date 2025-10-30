@@ -25,6 +25,7 @@ Notes:
 
 import csv
 from typing import Dict, List, Any
+import numpy as np
 
 def read_dev(dev_file_path: str) -> Dict[str, List[Any]]:
 	"""
@@ -649,3 +650,218 @@ def fault_stress_visualization(sv,
 		print("Friction Coefficient not provided; slip analysis not performed.")
 	
 	return fig
+
+def kirsch_wellbore_stresses(theta,
+							r,
+							a,
+							Pw,
+							Pp,
+							Sv=None,
+							SHmax=None,
+							Shmin=None,
+							sigmav=None,
+							sigmaHmax=None,
+							sigmahmin=None,
+							poisson_ratio=None,
+							):
+	"""
+	Calculate Stresses around a circular wellbore using Kirsch equations.
+
+	Args:
+		theta (float or np.ndarray): 
+			Angle clockwise around the wellbore in radians.
+		
+		r (float or np.ndarray): 
+			Radial distance from the wellbore center. Must be >= a.
+		
+		a (float): 
+			Wellbore radius in consistent length units.
+		
+		Pw (float): 
+			Wellbore pressure in consistent pressure units.
+		
+		Pp (float): 
+			Pore pressure in consistent pressure units.
+		
+		Sv (float, optional): 
+			Vertical stress. Required if sigmav not provided.
+		
+		SHmax (float, optional): 
+			Maximum horizontal stress. Required if sigmaHmax not provided.
+		
+		Shmin (float, optional): 
+			Minimum horizontal stress. Required if sigmahmin not provided.
+		
+		sigmav (float, optional): 
+			Vertical effective stress. If provided, overrides Sv - Pp.
+		
+		sigmaHmax (float, optional): 
+			Maximum horizontal effective stress. If provided, overrides SHmax - Pp.
+		
+		sigmahmin (float, optional): 
+			Minimum horizontal effective stress. If provided, overrides Shmin - Pp.
+		
+		poisson_ratio (float, optional): 
+			Poisson's ratio of the formation. If provided, calculates axial stress.
+
+	Returns:
+		tuple: A tuple containing calculated stress components:
+		
+			sigma_rr (float or np.ndarray): Radial stress at (r, theta).
+			sigma_tt (float or np.ndarray): Tangential stress at (r, theta).
+			sigma_rt (float or np.ndarray): Radial-tangential stress at (r, theta).
+			sigma_zz (float or np.ndarray, optional): Axial stress at (r, theta). 
+				Returned only if poisson_ratio is provided.
+	"""
+
+	if sigmav is None:
+		if Sv is None:
+			sigmav = None
+		else:
+			sigmav = Sv - Pp
+	if sigmaHmax is None:
+		if SHmax is None:
+			raise ValueError("Either sigmaHmax or SHmax must be provided.")
+		else:
+			sigmaHmax = SHmax - Pp
+	if sigmahmin is None:
+		if Shmin is None:
+			raise ValueError("Either sigmahmin or Shmin must be provided.")
+		else:
+			sigmahmin = Shmin - Pp
+
+	sigma_rr = ((Pw - Pp) * (a**2 / r**2) 
+			 + (sigmaHmax + sigmahmin) / 2 * (1 - a**2 / r**2)
+			 + (sigmaHmax - sigmahmin) / 2 * (1 - 4 * a**2 / r**2 + 3 * a**4 / r**4) 
+			 * np.cos(2 * theta))
+	sigma_tt = (- (Pw - Pp) * (a**2 / r**2) 
+			 + (sigmaHmax + sigmahmin) / 2 * (1 + a**2 / r**2)
+			 - (sigmaHmax - sigmahmin) / 2 * (1 + 3 * a**4 / r**4) 
+			 * np.cos(2 * theta))
+	sigma_rt = - (sigmaHmax - sigmahmin) / 2 * (1 + 2 * a**2 / r**2 - 3 * a**4 / r**4)
+	if poisson_ratio is None:
+		return sigma_rr, sigma_tt, sigma_rt
+	sigma_zz = sigmav - 2 * poisson_ratio * (sigmaHmax - sigmahmin) * (a**2 / r**2) * np.cos(2 * theta)
+	return sigma_rr, sigma_tt, sigma_rt, sigma_zz
+
+def calculate_mud_weights(Pp,
+						  UCS,
+						  wbo,
+						  Ts,
+						  well_depth=None,
+						  mu=None,
+						  q=None,
+						  sigmaHmax=None,
+						  sigmahmin=None,
+						  SHmax=None,
+						  Shmin=None):
+	"""
+	Calculate the mud weights required to prevent breakouts of a specified angle, 
+	shear failure, and tensile fractures. Uses 8.3 ppg and 0.44 psi/ft for conversion.
+
+	Args:
+		Pp (float): 
+			Pore pressure in consistent pressure units (psi, MPa, etc.).
+		
+		UCS (float): 
+			Unconfined compressive strength of the formation in same units as Pp.
+		
+		wbo (float): 
+			Desired breakout angle in degrees. The maximum allowable breakout 
+			width for wellbore stability analysis.
+		
+		Ts (float): 
+			Tensile strength of the formation in same units as Pp.
+		
+		mu (float, optional): 
+			Friction coefficient of the formation. Required if q not provided.
+			Typical values range from 0.6-0.85 for most rock types.
+		
+		q (float, optional): 
+			Friction angle in radians. Required if mu not provided.
+			Alternative to mu for specifying formation strength properties.
+		
+		sigmaHmax (float, optional): 
+			Effective maximum horizontal stress in same units as Pp. 
+			Required if SHmax not provided.
+		
+		sigmahmin (float, optional): 
+			Effective minimum horizontal stress in same units as Pp. 
+			Required if Shmin not provided.
+		
+		SHmax (float, optional): 
+			Total maximum horizontal stress in same units as Pp. 
+			Required if sigmaHmax not provided.
+		
+		Shmin (float, optional): 
+			Total minimum horizontal stress in same units as Pp. 
+			Required if sigmahmin not provided.
+
+	Returns:
+		tuple: A tuple containing three mud weight values:
+		
+			ppg_breakout (float): Mud weight required to prevent breakout 
+				of the specified angle.
+			ppg_shear (float): Mud weight required to prevent shear failure 
+				of the wellbore wall.
+			ppg_tensile (float): Mud weight required to prevent tensile 
+				fractures in the formation.
+
+	Raises:
+		ValueError: 
+			If neither q nor mu is provided, or if neither effective stresses 
+			nor total stresses are provided for horizontal stress components.
+
+	Examples:
+		>>> # Using friction coefficient and effective stresses
+		>>> breakout, shear, tensile = calculate_mud_weights(
+		...     Pp=2000, UCS=5000, wbo=60, Ts=500, mu=0.7,
+		...     sigmaHmax=4000, sigmahmin=3000
+		... )
+		
+		>>> # Using friction angle and total stresses
+		>>> breakout, shear, tensile = calculate_mud_weights(
+		...     Pp=2000, UCS=5000, wbo=45, Ts=400, q=0.6435,
+		...     SHmax=6000, Shmin=5000
+		... )
+
+	Notes:
+		- Function automatically converts total stresses to effective stresses
+		- All stress inputs must be in consistent units
+		- Breakout angle (wbo) should be specified based on drilling requirements
+		- Function uses Mohr-Coulomb failure criterion for calculations
+	"""
+	if q is None:
+		if mu is None:
+			raise ValueError("Either q or mu must be provided.")
+		else:
+			phi = np.arctan(mu)
+			q = (1 + np.sin(phi)) / (1 - np.sin(phi))
+			# print(f"q = {q:.4f} calculated from mu = {mu:.4f}")
+	if sigmaHmax is None:
+		if SHmax is None:
+			raise ValueError("Either sigmaHmax or SHmax must be provided.")
+		else:
+			sigmaHmax = SHmax - Pp
+
+	if sigmahmin is None:
+		if Shmin is None:
+			raise ValueError("Either sigmahmin or Shmin must be provided.")
+		else:
+			sigmahmin = Shmin - Pp
+
+	P_breakout = (Pp + (sigmaHmax + sigmahmin - 2 * (sigmaHmax-sigmahmin)
+					    * np.cos(np.pi - np.radians(wbo)) - UCS) / (1 + q))
+	
+	P_shear = Pp + (3 * sigmaHmax - sigmahmin - UCS) / (1 + q)
+
+	P_tensile = Pp + 3 * sigmahmin - sigmaHmax + Ts
+	# Convert pressures to ppg (assuming pressure in psi and depth in feet)
+	ppg_breakout = P_breakout * 8.3 / 0.44 / well_depth if well_depth is not None else None
+	ppg_shear = P_shear * 8.3 / 0.44 / well_depth if well_depth is not None else None
+	ppg_tensile = P_tensile * 8.3 / 0.44 / well_depth if well_depth is not None else None
+
+	if well_depth is None:
+		print("Note: well_depth not provided; mud weights returned in pressure units (psi)")
+		return P_breakout, P_shear, P_tensile
+	return ppg_breakout, ppg_shear, ppg_tensile
