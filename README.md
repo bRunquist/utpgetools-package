@@ -4,21 +4,13 @@ A collection of utility tools for your UT PGE projects.
 
 ## Installation
 
-Install directly from GitHub with real time updates:
+Install directly from GitHub:
 
 ```bash
-git clone https://github.com/bRunquist/utpgetools-package
-cd \utpgetools-package
-pip install -e .
-```
-Install from GitHub without realtime updates
-```bash
-git clone https://github.com/bRunquist/utpgetools-package
-cd \utpgetools
-pip install .
+pip install git+https://github.com/bRunquist/utpgetools.git
 ```
 
-Install from PyPi:
+Or, if published on PyPI (it is not right now and likely will not be):
 
 ```bash
 pip install utpgetools
@@ -30,10 +22,6 @@ pip install utpgetools
 from utpgetools import hello_world
 
 print(hello_world())
-```
-```python
-import utpgetools.artificial_lift as al
-al.pcpdesign()
 ```
 
 ## Development

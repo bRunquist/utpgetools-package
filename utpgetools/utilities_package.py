@@ -1,3 +1,50 @@
+"""
+Petroleum Engineering Utilities Package
+
+This module provides comprehensive utilities for petroleum engineering calculations,
+focusing on fluid properties, multiphase flow analysis, and pressure-volume-temperature
+(PVT) relationships. The module contains sophisticated correlations and calculation
+methods commonly used in reservoir engineering, production engineering, and 
+facilities design.
+
+Main Functions:
+    two_phase_flow: Multiphase flow calculations using Modified Hagedorn & Brown method
+    oil_properties_calculation: Oil PVT properties vs pressure at constant temperature  
+    gas_properties_calculation: Gas PVT properties vs pressure at constant temperature
+    incompressible_single_phase: Single-phase liquid flow pressure drop calculations
+    compressible_single_phase: Compressible gas flow pressure traverse calculations
+
+Correlations and Methods:
+    - Vasquez-Beggs correlation for oil properties (Rs, Bo, viscosity)
+    - Beggs & Robinson correlation for oil viscosity
+    - Standing-Katz correlation for gas compressibility (z-factor)
+    - Lee-Gonzalez-Eakin correlation for gas viscosity
+    - Modified Hagedorn & Brown method for multiphase flow
+    - Colebrook-White equation for friction factors
+    - Wichert-Aziz correction for sour gas components
+
+Applications:
+    - Reservoir fluid characterization and PVT analysis
+    - Wellbore hydraulics and pressure traverse calculations
+    - Production tubing design and optimization
+    - Multiphase flow analysis in pipes and wellbores
+    - Artificial lift system design and analysis
+    - Facilities engineering and pipeline design
+
+Dependencies:
+    - numpy: For numerical calculations and array operations
+    - math: For mathematical functions and constants
+
+Notes:
+    All functions include comprehensive input validation, unit consistency checks,
+    and detailed documentation of correlations used. The module is designed to
+    handle both single-point calculations and parametric studies over ranges
+    of pressures and temperatures.
+    
+    Temperature inputs use Fahrenheit, pressures use psia, and flow rates use
+    field units (STB/D, Mscf/D, bbl/D) unless otherwise specified.
+"""
+
 import numpy as np
 def two_phase_flow(
     diameter_in=2.259,

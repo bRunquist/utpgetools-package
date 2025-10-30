@@ -1,14 +1,77 @@
 
+"""
+Geomechanics Analysis Module
+
+This module provides functions for geomechanical analysis in petroleum engineering,
+including stress visualization, fault stability analysis, and deviation survey data processing.
+The module focuses on 3D stress analysis using Mohr's circle representations and fault
+characterization for wellbore stability and fracture analysis.
+
+Functions:
+    read_dev: Reads deviation survey files and returns structured data
+    fault_stress_visualization: Creates comprehensive 3D fault stress visualizations
+    
+Dependencies:
+    - numpy: For numerical calculations
+    - matplotlib: For 3D plotting and visualization
+    - csv: For deviation file parsing
+    - typing: For type hints
+    
+Notes:
+    This module is particularly useful for wellbore stability analysis, fracture
+    characterization, and understanding the relationship between in-situ stresses
+    and fault orientations in subsurface formations.
+"""
+
 import csv
 from typing import Dict, List, Any
 
 def read_dev(dev_file_path: str) -> Dict[str, List[Any]]:
 	"""
-	Reads a .dev file and returns a dictionary where each key is a column name and each value is a list of column values (floats if possible, otherwise strings).
+	Reads a deviation survey (.dev) file and returns structured column data.
+	
+	This function processes tab-delimited deviation survey files commonly used in
+	drilling and wellbore trajectory analysis. It automatically converts numeric
+	values to floats while preserving non-numeric data as strings, making it
+	suitable for mixed data types typically found in deviation surveys.
+	
 	Args:
-		dev_file_path (str): Path to the .dev file.
+		dev_file_path (str): Full file path to the .dev file to be read.
+			The file should be tab-delimited with headers in the first row.
+			Common columns include measured depth (MD), inclination, azimuth,
+			true vertical depth (TVD), northing, easting, dogleg severity, etc.
+	
 	Returns:
-		Dict[str, List[Any]]: Dictionary of columns with lists of values.
+		Dict[str, List[Any]]: Dictionary where each key is a column header (str)
+			and each value is a list of column values. Numeric values are converted
+			to float when possible, otherwise kept as strings. This allows for
+			mixed data types in the same dataset.
+	
+	Raises:
+		FileNotFoundError: If the specified file path does not exist.
+		PermissionError: If the file cannot be accessed due to permission issues.
+		csv.Error: If the file format is invalid or cannot be parsed as CSV/TSV.
+	
+	Examples:
+		>>> # Read a deviation survey file
+		>>> dev_data = read_dev("wellbore_survey.dev")
+		>>> print(dev_data.keys())
+		dict_keys(['MD', 'Inclination', 'Azimuth', 'TVD', 'Northing', 'Easting'])
+		
+		>>> # Access measured depth data
+		>>> measured_depths = dev_data['MD']
+		>>> print(f"Survey extends from {min(measured_depths)} to {max(measured_depths)} ft")
+		
+		>>> # Check data types
+		>>> print(type(dev_data['MD'][0]))  # <class 'float'>
+		>>> print(type(dev_data['Comments'][0]))  # <class 'str'> (if comments exist)
+	
+	Notes:
+		- The function assumes tab-delimited format (\t separator)
+		- Headers are read from the first row of the file
+		- Empty cells or invalid numeric entries are preserved as strings
+		- This function is commonly used for processing directional drilling data
+		- Compatible with standard industry deviation survey file formats
 	"""
 	columns = {}
 	with open(dev_file_path, 'r', newline='') as f:
@@ -34,6 +97,110 @@ def fault_stress_visualization(sv,
 							   friction_coefficient=None,
 							   shmin_strike=None,
 							   shmax_strike=None):
+	"""
+	Creates comprehensive 3D fault stress visualization using Mohr's circle analysis.
+	
+	This function performs detailed geomechanical analysis of fault stability by creating
+	multiple visualization plots including 3D stress representation, top-down view with
+	fault orientation, and Mohr's circle analysis. The function determines fault stability
+	based on effective stress conditions and provides both visual and numerical analysis
+	of fault slip potential.
+	
+	The visualization includes:
+	1. 3D cubic stress volume with principal stress arrows and fault plane
+	2. Top-down view showing stress orientations and fault strike
+	3. 3D Mohr's circle with fault stress point analysis
+	
+	Args:
+		sv (float): Vertical stress (total stress) in psi or consistent pressure units.
+			This represents the overburden stress at the depth of interest.
+		shmax (float): Maximum horizontal stress (total stress) in same units as sv.
+			The maximum principal horizontal stress in the formation.
+		shmin (float): Minimum horizontal stress (total stress) in same units as sv.
+			The minimum principal horizontal stress in the formation.
+		pore_pressure (float): Pore pressure in same units as stresses.
+			Used to calculate effective stresses for Mohr's circle analysis.
+		fault_strike (float): Fault strike direction in degrees (0-360°).
+			Geological convention: 0° = North, measured clockwise.
+			This is the direction of the fault trace on a horizontal surface.
+		fault_dip (float): Fault dip angle in degrees (0-90°).
+			The angle between the fault plane and horizontal, measured downward
+			from horizontal. 0° = horizontal, 90° = vertical.
+		friction_coefficient (float, optional): Friction coefficient for fault surface.
+			If provided, enables slip analysis and failure envelope plotting.
+			Typical values range from 0.6-0.85 for most rock types.
+		shmin_strike (float, optional): Strike direction of minimum horizontal stress in degrees.
+			If not provided, assumed perpendicular to shmax_strike (shmax_strike + 90°).
+		shmax_strike (float, optional): Strike direction of maximum horizontal stress in degrees.
+			If not provided, assumed perpendicular to shmin_strike (shmin_strike - 90°).
+	
+	Returns:
+		matplotlib.figure.Figure or str: 
+			- If analysis is successful: matplotlib Figure object containing the complete visualization
+			- If fault orientation is invalid: Error message string describing the issue
+	
+	Raises:
+		ValueError: If input stress values are negative or if geometric constraints are violated.
+		TypeError: If required parameters are not provided or are of incorrect type.
+	
+	Computational Details:
+		- Calculates effective stresses by subtracting pore pressure from total stresses
+		- Determines appropriate Mohr's circle based on fault orientation relative to principal stresses
+		- For vertical faults (dip = 90°): Uses Circle 1 (Shmin-SHmax relationship)
+		- For inclined faults: Uses Circle 2 (SHmax-Sv) or Circle 3 (Shmin-Sv) based on 
+		  fault dip direction alignment with horizontal stress orientations
+		- Calculates normal and shear stresses on fault plane using Mohr's circle geometry
+		- Evaluates slip potential using Coulomb failure criterion if friction coefficient provided
+	
+	Visualization Components:
+		1. 3D Stress Cube:
+		   - Shows principal stress orientations as colored arrows
+		   - Displays fault plane intersection with stress cube
+		   - Uses geological coordinate system (North-East-Depth)
+		
+		2. Map View:
+		   - Top-down projection showing horizontal stress orientations
+		   - Fault trace representation with strike direction
+		   - Stress-aligned coordinate system visualization
+		
+		3. Mohr's Circle Plot:
+		   - Three principal Mohr's circles for complete 3D stress state
+		   - Fault stress point plotted on appropriate circle
+		   - Failure envelope (if friction coefficient provided)
+		   - Detailed stress component analysis
+	
+	Examples:
+		>>> # Basic fault analysis
+		>>> fig = fault_stress_visualization(
+		...     sv=6000,           # 6000 psi vertical stress
+		...     shmax=4500,        # 4500 psi max horizontal stress  
+		...     shmin=3000,        # 3000 psi min horizontal stress
+		...     pore_pressure=2000, # 2000 psi pore pressure
+		...     fault_strike=45,    # 45° fault strike (NE direction)
+		...     fault_dip=60,       # 60° fault dip
+		...     friction_coefficient=0.7,  # 0.7 friction coefficient
+		...     shmax_strike=90     # E-W maximum horizontal stress
+		... )
+		
+		>>> # Analysis without slip evaluation
+		>>> fig = fault_stress_visualization(
+		...     sv=5500, shmax=4000, shmin=2800, pore_pressure=1800,
+		...     fault_strike=120, fault_dip=75, shmax_strike=45
+		... )
+	
+	Notes:
+		- Function validates that fault dip direction aligns with principal horizontal stresses
+		- Non-aligned fault orientations return error messages rather than invalid analyses  
+		- All stress calculations use effective stress (total stress - pore pressure)
+		- Geological strike convention: measured clockwise from North
+		- Results include both graphical visualization and printed numerical analysis
+		- The function is designed for educational and professional geomechanical analysis
+		
+	References:
+		- Zoback, M.D. (2010). Reservoir Geomechanics, Cambridge University Press
+		- Fjaer, E. et al. (2008). Petroleum Related Rock Mechanics, Elsevier
+		- Jaeger, J.C. et al. (2007). Fundamentals of Rock Mechanics, Blackwell
+	"""
 	# package imports
 	import numpy as np
 	import matplotlib.pyplot as plt

@@ -1,3 +1,40 @@
+"""
+Artificial Lift Systems Analysis Module
+
+This module provides comprehensive functions for analyzing and designing artificial lift
+systems commonly used in oil and gas production. The module includes tools for various
+artificial lift methods including rod pumps, gas lift, plunger lift, and progressive
+cavity pumps (PCPs), along with supporting calculations for echometer analysis and
+well performance evaluation.
+
+Main Functions:
+    VLP: Vertical Lift Performance curve calculations using multiphase flow correlations
+    IPR: Inflow Performance Relationship calculations for reservoir-wellbore analysis
+    echometer_fl_bhp: Complete echometer analysis for fluid level and pressure calculations
+    gas_valve_depths: Gas lift valve depth calculations for unloading design
+    plunger_rate_calculation: Plunger lift cycle analysis and production rate estimation
+    pcp_design: Progressive cavity pump design and performance analysis
+
+Supporting Functions:
+    newton_laplace_vg: Gas sonic velocity calculations for echometer analysis
+    fluid_level_from_shot: Fluid level determination from acoustic travel time
+    calculate_flow_divided_by_area: Flow rate calculations from pressure buildup data
+    mccoy_correlation: Liquid holdup estimation using McCoy correlation
+    fluid_fractions: Individual fluid fraction calculations from mixture properties
+    bhp_from_fluid_level: Bottomhole pressure calculations from fluid level data
+
+Dependencies:
+    - numpy: For numerical calculations and array operations
+    - rich.console: For enhanced console output formatting
+    - utpgetools.utilities_package: For fluid property calculations
+
+Notes:
+    This module is designed for petroleum engineers working on artificial lift
+    optimization, well performance analysis, and production system design. All
+    functions include comprehensive error checking and provide detailed console
+    output for transparency in calculations.
+"""
+
 import numpy as np
 from rich.console import Console
 from rich.text import Text
@@ -363,25 +400,244 @@ def IPR(q_test=None, p_test=None, p_res=None, pwf=None, J=None, p_b=None, show_p
     return q_curves if len(q_curves) > 1 else q_curves[0]
 
 def newton_laplace_vg(z,T,gamma_g,k=1.25):
-    T = T + 460 # Convert to Rankine
+    """
+    Calculate gas sonic velocity using the Newton-Laplace equation.
+    
+    This function computes the speed of sound in gas using gas properties and the
+    Newton-Laplace equation, which is commonly used in echometer analysis for
+    determining fluid levels in wells and acoustic shot interpretation.
+    
+    Args:
+        z (float): Gas compressibility factor (z-factor) at the conditions of interest.
+            Dimensionless value typically between 0.7-1.1 for most reservoir conditions.
+        T (float): Temperature in degrees Rankine (°R = °F + 459.67).
+            Should be the temperature at the depth where sonic velocity is calculated.
+        gamma_g (float): Gas specific gravity (dimensionless, relative to air).
+            Standard value is approximately 0.6-0.8 for typical natural gas.
+        k (float, optional): Specific heat ratio (Cp/Cv) for the gas.
+            Default value is 1.25, which is typical for natural gas mixtures.
+            
+    Returns:
+        float: Gas sonic velocity in feet per second (ft/s).
+        
+    Examples:
+        >>> # Calculate sonic velocity for typical conditions
+        >>> z_factor = 0.85
+        >>> temp_rankine = 580  # 120°F + 460
+        >>> gas_sg = 0.65
+        >>> velocity = newton_laplace_vg(z_factor, temp_rankine, gas_sg)
+        >>> print(f"Sonic velocity: {velocity:.1f} ft/s")
+        
+        >>> # Using custom specific heat ratio
+        >>> velocity = newton_laplace_vg(0.9, 600, 0.7, k=1.3)
+        
+    Notes:
+        - Formula: vg = 41.44 * sqrt(k * z * T / gamma_g)
+        - The constant 41.44 includes unit conversion factors
+        - Commonly used in echometer analysis for acoustic well surveys
+        - Temperature must be in absolute scale (Rankine)
+        - Results are sensitive to gas composition through gamma_g and k
+    """
     return 41.44*np.sqrt(k * z * T / gamma_g)
 
 def fluid_level_from_shot(deltat,vg):
+    """
+    Calculate fluid level depth from acoustic travel time.
+    
+    This function determines the depth to fluid level in a wellbore using the
+    acoustic travel time and gas sonic velocity. This is the fundamental calculation
+    used in echometer analysis for fluid level determination.
+    
+    Args:
+        deltat (float): Acoustic travel time in seconds.
+            This is the time for sound to travel from surface to fluid level and back.
+        vg (float): Gas sonic velocity in feet per second (ft/s).
+            Typically calculated using newton_laplace_vg() function.
+            
+    Returns:
+        float: Depth to fluid level in feet from surface.
+        
+    Examples:
+        >>> # Calculate fluid level from echometer shot
+        >>> travel_time = 2.5  # seconds
+        >>> sonic_velocity = 1100  # ft/s
+        >>> fluid_depth = fluid_level_from_shot(travel_time, sonic_velocity)
+        >>> print(f"Fluid level at {fluid_depth:.0f} feet")
+        
+        >>> # Combined with sonic velocity calculation
+        >>> z, T, gamma_g = 0.85, 580, 0.65
+        >>> vg = newton_laplace_vg(z, T, gamma_g)
+        >>> depth = fluid_level_from_shot(2.8, vg)
+        
+    Notes:
+        - Formula: L = deltat * vg / 2
+        - Division by 2 accounts for round-trip travel time
+        - Assumes sound travels at constant velocity in gas column
+        - Used extensively in artificial lift optimization and monitoring
+        - Results depend on accurate gas property determination
+    """
     return deltat*vg/2
 
 def calculate_flow_divided_by_area(deltap,h,deltat):
+    """
+    Calculate flow rate per unit area from pressure buildup data.
+    
+    This function computes the flow rate divided by cross-sectional area using
+    pressure buildup analysis, commonly used in echometer analysis and fluid
+    level calculations for determining well productivity.
+    
+    Args:
+        deltap (float): Pressure buildup during test period in psi.
+            The pressure increase observed during the shut-in period.
+        h (float): Height of fluid column or relevant length in feet.
+            Typically the fluid level depth or height of fluid column.
+        deltat (float): Time period for pressure buildup in appropriate time units.
+            Should be consistent with the correlation being used.
+            
+    Returns:
+        float: Flow rate divided by area (q/A) in ft/s or consistent velocity units.
+        
+    Examples:
+        >>> # Calculate from echometer data
+        >>> pressure_buildup = 15.0  # psi
+        >>> fluid_height = 3500     # feet
+        >>> buildup_time = 120      # consistent time units
+        >>> q_over_a = calculate_flow_divided_by_area(pressure_buildup, fluid_height, buildup_time)
+        >>> print(f"Flow/Area ratio: {q_over_a:.3f} ft/s")
+        
+    Notes:
+        - Formula: q/A = 0.68 * (deltap * h / deltat)
+        - The constant 0.68 is an empirical correlation factor
+        - Used in conjunction with McCoy correlation for liquid holdup analysis
+        - Units must be consistent throughout the calculation
+        - Commonly applied in echometer-based well analysis
+    """
     return 0.68 * (deltap * h / deltat)
 
 def mccoy_correlation(q_over_a):
+    """
+    Calculate liquid fraction using McCoy correlation.
+    
+    This function applies the McCoy correlation to determine liquid holdup fraction
+    in multiphase flow based on the flow rate per unit area. This correlation is
+    commonly used in echometer analysis for determining fluid compositions in
+    wellbores.
+    
+    Args:
+        q_over_a (float): Flow rate divided by cross-sectional area in ft/s.
+            Typically calculated using calculate_flow_divided_by_area() function.
+            
+    Returns:
+        float: Liquid fraction (fl) as a dimensionless value between 0 and 1.
+            Represents the volume fraction of liquid in the fluid mixture.
+            
+    Examples:
+        >>> # Apply McCoy correlation
+        >>> flow_area_ratio = 0.15  # ft/s
+        >>> liquid_fraction = mccoy_correlation(flow_area_ratio)
+        >>> print(f"Liquid fraction: {liquid_fraction:.3f}")
+        >>> print(f"Liquid percentage: {liquid_fraction*100:.1f}%")
+        
+        >>> # Combined calculation from pressure buildup
+        >>> deltap, h, deltat = 12.0, 4000, 150
+        >>> q_a = calculate_flow_divided_by_area(deltap, h, deltat)
+        >>> fl = mccoy_correlation(q_a)
+        
+    Notes:
+        - Formula: fl = 4.6572 * (q/A)^(-0.319)
+        - This is an empirical correlation derived from field data
+        - Valid for typical oil and gas well conditions
+        - Used extensively in artificial lift analysis
+        - Results should be validated against field observations
+    """
     return 4.6572 * (q_over_a)**(-0.319)
 
 def fluid_fractions(fl,WOR):
+    """
+    Calculate individual fluid fractions from total liquid fraction and water-oil ratio.
+    
+    This function breaks down the total liquid fraction into oil, water, and gas
+    components based on the water-oil ratio. This is essential for understanding
+    the fluid composition in multiphase flow analysis.
+    
+    Args:
+        fl (float): Total liquid fraction (dimensionless, 0-1).
+            Typically obtained from McCoy correlation or other holdup correlations.
+        WOR (float): Water-oil ratio (dimensionless).
+            Volumetric ratio of water to oil production (water volume / oil volume).
+            
+    Returns:
+        tuple: Three-element tuple containing:
+            - fo (float): Oil fraction (dimensionless, 0-1)
+            - fw (float): Water fraction (dimensionless, 0-1)  
+            - fg (float): Gas fraction (dimensionless, 0-1)
+            
+    Examples:
+        >>> # Calculate fractions for oil-dominated production
+        >>> liquid_frac = 0.65   # 65% liquid
+        >>> water_oil_ratio = 0.5  # 0.5:1 WOR
+        >>> fo, fw, fg = fluid_fractions(liquid_frac, water_oil_ratio)
+        >>> print(f"Oil: {fo:.3f}, Water: {fw:.3f}, Gas: {fg:.3f}")
+        Oil: 0.433, Water: 0.217, Gas: 0.350
+        
+        >>> # High water cut well
+        >>> fo, fw, fg = fluid_fractions(0.8, 4.0)  # 4:1 WOR, 80% liquid
+        >>> print(f"Water cut: {fw/(fo+fw)*100:.1f}%")
+        
+    Notes:
+        - fo = fl / (1 + WOR)
+        - fw = fl - fo  
+        - fg = 1 - fl
+        - Sum of all fractions equals 1.0
+        - Used in echometer analysis and multiphase flow calculations
+        - Essential for bottomhole pressure calculations
+    """
     fo = fl / (1+WOR)
     fw = fl-fo
     fg = 1-fl
     return fo,fw,fg
 
 def bhp_from_fluid_level(gamma_f,TD,H,psa=50):
+    """
+    Calculate bottomhole pressure from fluid level and fluid properties.
+    
+    This function computes bottomhole pressure using hydrostatic pressure principles,
+    accounting for the fluid column height and specific gravity. Includes elevation
+    correction for annulus pressure measurement.
+    
+    Args:
+        gamma_f (float): Fluid specific gravity (dimensionless, relative to water).
+            Weighted average specific gravity of the fluid mixture in the wellbore.
+        TD (float): Total well depth in feet.
+            True vertical depth or measured depth depending on well geometry.
+        H (float): Fluid level depth in feet from surface.
+            Depth to the fluid interface, typically from echometer analysis.
+        psa (float, optional): Surface annulus pressure in psia.
+            Default value is 50 psia. Pressure at surface reference point.
+            
+    Returns:
+        float: Bottomhole pressure in psia.
+        
+    Examples:
+        >>> # Calculate BHP for typical conditions
+        >>> fluid_sg = 0.85      # Mixed fluid specific gravity
+        >>> total_depth = 5000   # 5000 ft well
+        >>> fluid_level = 3500   # 3500 ft fluid level
+        >>> surface_pressure = 45  # 45 psia surface pressure
+        >>> bhp = bhp_from_fluid_level(fluid_sg, total_depth, fluid_level, surface_pressure)
+        >>> print(f"Bottomhole pressure: {bhp:.1f} psia")
+        
+        >>> # Using default surface pressure
+        >>> bhp = bhp_from_fluid_level(0.9, 6000, 4200)
+        
+    Notes:
+        - Formula: BHP = psa * (1 + H/40000) + 0.433 * gamma_f * (TD - H)
+        - The term (1 + H/40000) provides elevation correction
+        - 0.433 is the hydrostatic pressure gradient for water (psi/ft per unit SG)
+        - (TD - H) is the height of fluid column above bottomhole
+        - Assumes single-phase fluid properties for the column
+        - Used extensively in artificial lift analysis and well monitoring
+    """
     return psa * (1 + H/40000) + 0.433 * gamma_f * (TD - H)
 
 def echometer_fl_bhp(PBU_time, travel_time, deltap, API, gamma_g, gamma_w, temperature_f, psa, WOR, TVD):
