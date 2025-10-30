@@ -4,13 +4,21 @@ A collection of utility tools for your UT PGE projects.
 
 ## Installation
 
-Install directly from GitHub:
+Install directly from GitHub with real time updates:
 
 ```bash
-pip install git+https://github.com/bRunquist/utpgetools.git
+git clone https://github.com/bRunquist/utpgetools-package
+cd \utpgetools-package
+pip install -e .
+```
+Install from GitHub without realtime updates
+```bash
+git clone https://github.com/bRunquist/utpgetools-package
+cd \utpgetools
+pip install .
 ```
 
-Or, if published on PyPI (it is not right now and likely will not be):
+Install from PyPi:
 
 ```bash
 pip install utpgetools
