@@ -773,13 +773,17 @@ def calculate_mud_weights(Pp,
 		Ts (float): 
 			Tensile strength of the formation in same units as Pp.
 		
+		well_depth (float, optional):
+			Well depth in feet. Required for mud weight calculation in ppg.
+			If not provided, only pressures are calculated.
+		
 		mu (float, optional): 
 			Friction coefficient of the formation. Required if q not provided.
 			Typical values range from 0.6-0.85 for most rock types.
 		
 		q (float, optional): 
-			Friction angle in radians. Required if mu not provided.
-			Alternative to mu for specifying formation strength properties.
+			Mohr-Coulomb failure criterion parameter. Required if mu not provided.
+			Calculated as q = (1 + sin(φ))/(1 - sin(φ)) where φ = arctan(μ).
 		
 		sigmaHmax (float, optional): 
 			Effective maximum horizontal stress in same units as Pp. 
@@ -798,14 +802,20 @@ def calculate_mud_weights(Pp,
 			Required if sigmahmin not provided.
 
 	Returns:
-		tuple: A tuple containing three mud weight values:
+		tuple: A tuple containing two lists of calculated values:
 		
-			ppg_breakout (float): Mud weight required to prevent breakout 
-				of the specified angle.
-			ppg_shear (float): Mud weight required to prevent shear failure 
-				of the wellbore wall.
-			ppg_tensile (float): Mud weight required to prevent tensile 
-				fractures in the formation.
+			pressures (list): List of three pressure values in same units as input:
+				[P_breakout, P_shear, P_tensile]
+				- P_breakout: Pressure required to prevent specified breakout angle
+				- P_shear: Pressure required to prevent shear failure  
+				- P_tensile: Pressure required to prevent tensile fractures
+				
+			mudweights (list): List of three mud weight values in ppg:
+				[ppg_breakout, ppg_shear, ppg_tensile]
+				- ppg_breakout: Mud weight to prevent breakout (ppg)
+				- ppg_shear: Mud weight to prevent shear failure (ppg)
+				- ppg_tensile: Mud weight to prevent tensile fractures (ppg)
+				- Returns [None, None, None] if well_depth not provided
 
 	Raises:
 		ValueError: 
@@ -813,23 +823,30 @@ def calculate_mud_weights(Pp,
 			nor total stresses are provided for horizontal stress components.
 
 	Examples:
-		>>> # Using friction coefficient and effective stresses
-		>>> breakout, shear, tensile = calculate_mud_weights(
-		...     Pp=2000, UCS=5000, wbo=60, Ts=500, mu=0.7,
+		>>> # Using friction coefficient and effective stresses with well depth
+		>>> pressures, mudweights = calculate_mud_weights(
+		...     Pp=2000, UCS=5000, wbo=60, Ts=500, well_depth=8000, mu=0.7,
 		...     sigmaHmax=4000, sigmahmin=3000
 		... )
+		>>> print(f"Pressures: {pressures}")
+		>>> print(f"Mud weights (ppg): {mudweights}")
 		
-		>>> # Using friction angle and total stresses
-		>>> breakout, shear, tensile = calculate_mud_weights(
-		...     Pp=2000, UCS=5000, wbo=45, Ts=400, q=0.6435,
+		>>> # Using friction angle and total stresses without well depth
+		>>> pressures, mudweights = calculate_mud_weights(
+		...     Pp=2000, UCS=5000, wbo=45, Ts=400, q=2.5,
 		...     SHmax=6000, Shmin=5000
 		... )
+		>>> print(f"Pressures: {pressures}")
+		>>> print(f"Mud weights: {mudweights}")  # Will be [None, None, None]
 
 	Notes:
 		- Function automatically converts total stresses to effective stresses
+		- If mu is provided, q is calculated using q = (1+sin(φ))/(1-sin(φ)) where φ = arctan(μ)
+		- Mud weight conversion uses: ppg = pressure * 8.3 / 0.44 / well_depth  
 		- All stress inputs must be in consistent units
 		- Breakout angle (wbo) should be specified based on drilling requirements
 		- Function uses Mohr-Coulomb failure criterion for calculations
+		- If well_depth is not provided, mudweights will be [None, None, None]
 	"""
 	if q is None:
 		if mu is None:
@@ -861,7 +878,8 @@ def calculate_mud_weights(Pp,
 	ppg_shear = P_shear * 8.3 / 0.44 / well_depth if well_depth is not None else None
 	ppg_tensile = P_tensile * 8.3 / 0.44 / well_depth if well_depth is not None else None
 
+	pressures = [P_breakout, P_shear, P_tensile]
+	mudweights = [ppg_breakout, ppg_shear, ppg_tensile] if well_depth is not None else [None, None, None]
 	if well_depth is None:
-		print("Note: well_depth not provided; mud weights returned in pressure units (psi)")
-		return P_breakout, P_shear, P_tensile
-	return ppg_breakout, ppg_shear, ppg_tensile
+		print("Well depth not provided; mud weights in ppg not calculated.")
+	return pressures, mudweights
