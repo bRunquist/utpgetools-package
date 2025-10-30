@@ -1,0 +1,39 @@
+Custom Academic Use License
+
+Copyright (c) 2025 Brecken Runquist
+
+Permission is hereby granted to any person obtaining a copy of this
+software and associated documentation files (the "Software") to use
+the Software for personal, non-commercial purposes, subject to the
+following conditions:
+
+1. **No Redistribution**  
+    The Software may not be distributed, shared, published, or otherwise
+    made available to any other party, in whole or in part, without the
+    express written permission of the copyright holder.
+
+2. **Academic Integrity**  
+    The Software may not be used, directly or indirectly, to submit
+    solutions for graded assignments, homework, exams, or any form of
+    academic assessment, nor for any activity that would violate the
+    academic integrity policies of any educational institution.
+
+3. **No Commercial Use**  
+    The Software may not be used for commercial purposes or as part of
+    any product or service offered for sale.
+
+4. **No Modification for Distribution**  
+    You may modify the Software for personal use, but you may not
+    distribute any modified versions without the express written
+    permission of the copyright holder.
+
+5. **Disclaimer**  
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE
+    LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN
+    ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR
+    IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+    THE SOFTWARE.
+
+For permissions beyond the scope of this license, contact Brecken
+Runquist at [breck@ecrede.com].
