@@ -45,18 +45,8 @@ jobs:
       run: |
         twine upload dist/*
         
-    - name: Create GitHub Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v${{ steps.get_version.outputs.version }}
-        release_name: Release v${{ steps.get_version.outputs.version }}
-        body: |
-          🚀 **utpgetools v${{ steps.get_version.outputs.version }}**
-          
-          Automatically published to PyPI from publish branch.
-          
-          Install with: `pip install utpgetools==${{ steps.get_version.outputs.version }}`
-        draft: false
-        prerelease: false
+    - name: Success Message
+      run: |
+        echo "✅ Successfully published utpgetools v${{ steps.get_version.outputs.version }} to PyPI!"
+        echo "📦 Install with: pip install utpgetools==${{ steps.get_version.outputs.version }}"
+        echo "🔗 View on PyPI: https://pypi.org/project/utpgetools/"
