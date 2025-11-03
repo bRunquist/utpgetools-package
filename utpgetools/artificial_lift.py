@@ -1175,6 +1175,7 @@ def pcp_design(API,
 
     Fr = pump_depth_ft * Wr * (1 - 0.127 * gamma_l)
     console.print(f"\nBuoyed rod load [bright_cyan]Fr[/bright_cyan]: [bright_red]{Fr:.2f}[/bright_red] lbf")
+    console.print(f"\n[bright_cyan]Fr[/bright_cyan] = pump_depth_ft * Wr * (1 - 0.127 * gamma_l)")
 
 
     Fb = 9/16 * np.pi * rotor_diameter**2 * (discharge_pressure - pwf)
