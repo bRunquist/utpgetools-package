@@ -182,114 +182,93 @@ def reduced_properties(gamma_g,P,T):
     return Pr, Tr
 
 
-def iterate_drag_coeff(rhoc, rhod, dm, mu, accuracy=0.01):
+
+
+def iterate_drag_coeff(continuum_density, 
+                       particle_density, 
+                       continuum_visc,
+                       particle_diameter,
+                       error=1e-12,
+                       max_iterations=1000000):
     """
-    Iteratively calculate drag coefficient and terminal velocity for droplet settling.
+    Iteratively calculate the drag coefficient (Cd) and terminal velocity (vt) for a particle in a fluid.
     
-    This function determines the drag coefficient and terminal velocity of a spherical
-    droplet falling through a continuous fluid phase using iterative solution of the
-    drag coefficient correlations. The calculation accounts for droplet size, density
-    difference, and fluid viscosity effects on settling behavior.
-    
+    This function uses an iterative approach to solve for the drag coefficient and terminal velocity
+    of a spherical particle settling in a fluid, accounting for the non-linear dependence of drag
+    coefficient on Reynolds number. The method is based on empirical correlations for drag in the
+    intermediate and turbulent regimes, and is commonly used in multiphase flow and separation calculations.
+
     Args:
-        rhoc (float): Continuous phase (gas) density in lb/ft³.
-            Density of the surrounding fluid through which the droplet settles.
-        rhod (float): Droplet (liquid) density in lb/ft³.
-            Density of the settling droplet or particle.
-        dm (float): Droplet diameter in microns (μm).
-            Size of the spherical droplet or particle.
-        mu (float): Continuous phase viscosity in centipoise (cp).
-            Dynamic viscosity of the fluid through which the droplet moves.
-        accuracy (float, optional): Convergence tolerance for iteration (default=0.01).
-            Relative error tolerance for Reynolds number convergence (1%).
-    
+        continuum_density (float):
+            Density of the continuous phase (fluid) in lb/ft³.
+        particle_density (float):
+            Density of the particle phase in lb/ft³.
+        continuum_visc (float):
+            Dynamic viscosity of the continuous phase (fluid) in cP (centipoise).
+        particle_diameter (float):
+            Diameter of the particle in inches. Can be a scalar or array-like.
+        error (float, optional):
+            Tolerance for convergence of the iterative solution.
+        max_iterations (int, optional):
+            Maximum number of iterations to perform.
+
     Returns:
-        tuple: A 3-element tuple containing:
-            - cd (float): Converged drag coefficient (dimensionless)
-            - vt (float): Terminal velocity of the droplet (ft/s)
-            - iterations (int): Number of iterations required for convergence
-    
-    Theory:
-        The calculation uses the force balance for terminal velocity:
-        Drag Force = Buoyancy Force
-        
-        Terminal velocity: vt = 0.0119 * sqrt(dm * |ρd - ρc| / cd / ρc)
-        Reynolds number: Re = 4.822e-3 * ρc * dm * vt / μ
-        
-        Drag coefficient correlations:
-        - For Re ≤ 1.0: cd = 24/Re (Stokes law)
-        - For Re > 1.0: cd = 24/Re + 3/sqrt(Re) + 0.34 (intermediate regime)
-    
-    Algorithm:
-        1. Initial guess: cd = 0.34
-        2. Calculate terminal velocity from force balance
-        3. Calculate Reynolds number from terminal velocity
-        4. Update drag coefficient based on Reynolds number
-        5. Repeat until Reynolds number converges within specified accuracy
-    
+        tuple or list: If particle_diameter is a scalar, returns a tuple (Cd, vt).
+            If particle_diameter is array-like, returns a list of (Cd, vt) tuples for each diameter.
+
+    Raises:
+        ValueError: If densities are equal (division by zero in drag calculation).
+
     Examples:
-        >>> # Water droplet settling in air
-        >>> rho_air = 0.075      # lb/ft³ at standard conditions
-        >>> rho_water = 62.4     # lb/ft³ at standard conditions  
-        >>> droplet_size = 100   # microns
-        >>> air_viscosity = 0.018  # cp at room temperature
-        >>> cd, vt, iters = iterate_drag_coeff(rho_air, rho_water, droplet_size, air_viscosity)
-        >>> print(f"Drag coefficient: {cd:.3f}")
-        >>> print(f"Terminal velocity: {vt:.3f} ft/s")
-        >>> print(f"Converged in {iters} iterations")
-        
-        >>> # Oil droplet in gas separator
-        >>> cd, vt, n = iterate_drag_coeff(0.25, 55.0, 50, 0.012, accuracy=0.001)
-        >>> settling_time = separator_height / vt  # time to settle through separator
-    
-    Applications:
-        - Separator design and sizing
-        - Droplet settling velocity calculations
-        - Phase separation efficiency analysis
-        - Demister and coalescer design
-        - Multiphase flow analysis
-    
+        >>> # Scalar input
+        >>> Cd, vt = iterate_drag_coeff(
+        ...     continuum_density=55.0, particle_density=62.4, continuum_visc=1.2, particle_diameter=0.01
+        ... )
+        >>> print(f"Drag coefficient: {Cd:.3f}")
+        >>> print(f"Terminal velocity: {vt:.4f} ft/s")
+
+        >>> # Array input
+        >>> results = iterate_drag_coeff(
+        ...     continuum_density=55.0, particle_density=62.4, continuum_visc=1.2, particle_diameter=[0.01, 0.02]
+        ... )
+        >>> for Cd, vt in results:
+        ...     print(f"Cd: {Cd:.3f}, vt: {vt:.4f} ft/s")
+
     Notes:
-        - Function assumes spherical droplets in the Stokes to intermediate flow regime
-        - Convergence is based on Reynolds number stability
-        - For very large or very small droplets, correlations may need modification
-        - Results are sensitive to accurate density and viscosity values
-        - Used extensively in facilities design for oil-gas-water separation
-    
-    References:
-        - Perry's Chemical Engineers' Handbook
-        - Coulson & Richardson's Chemical Engineering Volume 2
-        - McCain, W.D. (1990). The Properties of Petroleum Fluids
+        - The function uses an empirical correlation for drag coefficient:
+          Cd = 24/Re + 3/sqrt(Re) + 0.34 (for Re > 1), else Cd = 24/Re
+        - Iteration continues until the change in terminal velocity is less than 1e-6 ft/s
+        - Useful for droplet settling, particle separation, and multiphase flow analysis
+        - All units must be consistent (lb/ft³, cP, inches)
     """
-    
-    import numpy as np
-    # Initial guess for drag coefficient
-    cd = 0.34
-
-    # Use equation 5 to estimate terminal velocity
-    # Use terminal velocity in equation 4 to compute Reynolds number
-    # Get new estimate for drag coefficient using equation 3a or 3b depending on Re
-    # Repeat until less than 1% change in Reynolds number
-    
-    re = 1e3
-    iterations = 0
-    error = 1.0
-    
-    while error > accuracy:
-        re_old = re
-
-        vt = 0.0119 * np.sqrt(dm * np.abs(rhod - rhoc) / cd / rhoc)
-        re = 4.822 * 10**(-3) * rhoc * dm * vt / mu
-
-        if re <= 1.0:
-            cd = 24 / re
-        else:
-            cd = 24 / re + 3 / np.sqrt(re) + 0.34
-
-        error = np.abs((re - re_old) / re_old)
-        iterations += 1
-    
-    return cd, vt, iterations
+    # Handle both scalar and array-like input for particle_diameter
+    diam_array = particle_diameter
+    is_arraylike = isinstance(diam_array, (list, tuple, np.ndarray)) and not isinstance(diam_array, (str, bytes))
+    if not is_arraylike:
+        diam_array = [particle_diameter]
+    Cd_list = []
+    vt_list = []
+    for drop_size in diam_array:
+        if continuum_density == particle_density:
+            raise ValueError("Continuous and particle densities must not be equal.")
+        initial_k = np.sqrt(0.34*continuum_density/np.abs(continuum_density-particle_density))
+        error_squared = 1.0
+        vt = 0.0119/initial_k*np.sqrt(drop_size)
+        iteration = 0
+        while error_squared > error and iteration < max_iterations:
+            Re = 4.882*10**-3*continuum_density*drop_size*vt/continuum_visc
+            new_Cd = 24/Re + 3/np.sqrt(Re) + 0.34 if Re > 1 else 24/Re
+            new_k = np.sqrt(new_Cd*continuum_density/np.abs(continuum_density-particle_density))
+            new_vt = 0.0119/new_k*np.sqrt(drop_size)
+            error_squared = (new_vt - vt)**2
+            vt = new_vt
+            iteration += 1
+        Cd_list.append(new_Cd)
+        vt_list.append(vt)
+    if is_arraylike:
+        return Cd_list, vt_list
+    else:
+        return Cd_list[0], vt_list[0]
 
 
 def multi_stage_separator_design(P1, T1, Pn, Tn, n_stages):
