@@ -493,3 +493,242 @@ def gas_separation_efficiency(gas_moles, MW_oil, MW_gas, gamma_oil=None, gamma_g
     
     Esg = 5.615 * oil_molar_density / gas_molar_density * np.sum(gas_flash_fraction)
     return Esg
+
+def calculate_compressor_stage_hp(qg,
+                                  ps,
+                                  Ts,
+                                  ec,
+                                  C,
+                                  gamma_g,
+                                  co2_percent,
+                                  n2_percent,
+                                  h2s_percent,
+                                  h2o_percent,
+                                  deltacp=None,
+                                  pd=None,
+                                  R=None,
+                                  z_factor=None,
+                                  return_all_vals=None):
+    """
+    Calculate the horsepower required for a single compressor stage in gas compression.
+    
+    This function computes the theoretical horsepower needed to compress natural gas
+    from suction to discharge conditions in a reciprocating or centrifugal compressor.
+    The calculation accounts for gas properties, compression efficiency, volumetric
+    efficiency, and non-ideal gas behavior using real gas equations of state.
+    
+    Args:
+        qg (float): Gas flow rate at standard conditions in MMSCF/D.
+            Million standard cubic feet per day of gas to be compressed.
+        ps (float): Suction pressure at compressor inlet in psia.
+            The absolute pressure of gas entering the compressor stage.
+        Ts (float): Suction temperature at compressor inlet in degrees Fahrenheit (°F).
+            The temperature of gas entering the compressor stage.
+        ec (float): Compressor mechanical efficiency as decimal (dimensionless).
+            Overall mechanical efficiency of the compressor unit, typically 0.80-0.95.
+            Accounts for mechanical losses in driver, gearbox, and compressor.
+        C (float): Clearance coefficient (dimensionless).
+            Ratio of clearance volume to swept volume in reciprocating compressors.
+            Typical values: 0.03-0.10 (3%-10%). Use 0.05 as default for most applications.
+        gamma_g (float): Gas specific gravity (dimensionless, relative to air).
+            Specific gravity of the gas mixture relative to air (air = 1.0).
+            Typical values for natural gas: 0.55-0.75.
+        co2_percent (float): Carbon dioxide mole percentage in gas.
+            CO2 content as mole percent. Affects gas properties significantly.
+        n2_percent (float): Nitrogen mole percentage in gas.
+            N2 content as mole percent.
+        h2s_percent (float): Hydrogen sulfide mole percentage in gas.
+            H2S content as mole percent. Important for sour gas applications.
+        h2o_percent (float): Water vapor mole percentage in gas.
+            H2O content as mole percent.
+        deltacp (float, optional): Heat capacity correction factor (dimensionless).
+            Correction factor for specific heat calculations. Required input.
+            If None, function will print message and return without calculation.
+        pd (float, optional): Discharge pressure in psia.
+            Target discharge pressure from the compressor stage.
+            Either pd or R must be provided.
+        R (float, optional): Compression ratio (dimensionless).
+            Ratio of discharge pressure to suction pressure (pd/ps).
+            Either pd or R must be provided.
+        z_factor (float, optional): Manual gas compressibility factor override.
+            If provided, bypasses automatic z-factor calculation from gas properties.
+            Use this when gas specific gravity is outside correlation bounds.
+            Typical values range from 0.7 to 1.2 for most conditions.
+        return_all_vals (bool, optional): Return additional calculated values.
+            If None (default), returns only horsepower.
+            If True, returns tuple of all calculated parameters.
+    
+    Returns:
+        float or tuple: 
+            - If return_all_vals is None: Horsepower in HP
+            - If return_all_vals is True: Tuple of (horsepower in HP, volumetric efficiency, 
+              discharge pressure in psia, compression ratio, isentropic exponent k, 
+              gas compressibility factor z)
+    
+    Raises:
+        ValueError: If neither pd nor R is provided.
+        SystemExit: If deltacp is None (function prints message and returns None).
+    
+    Theory:
+        The horsepower calculation uses the polytropic compression equation:
+        
+        HP = 0.08584 * (k/(k-1)) * Ts * ((pd/ps)^(z*(k-1)/k) - 1) * qg / (ec * ev)
+        
+        Where:
+        - k = specific heat ratio (cp/cv)
+        - z = gas compressibility factor at suction conditions
+        - ev = volumetric efficiency
+        
+        Volumetric efficiency accounts for clearance volume effects:
+        ev = 1 - C * ((p2/p1)^(1/k) - 1)
+        
+        Gas properties are calculated using real gas correlations accounting
+        for gas composition and non-ideal behavior.
+    
+    Examples:
+        >>> # Basic compression calculation with sweet gas
+        >>> horsepower = calculate_compressor_stage_hp(
+        ...     qg=50.0,           # 50 MMSCF/D
+        ...     ps=500,            # 500 psia suction
+        ...     Ts=100,            # 100°F suction temp
+        ...     ec=0.85,           # 85% mechanical efficiency
+        ...     C=0.05,            # 5% clearance
+        ...     gamma_g=0.65,      # 0.65 gas gravity
+        ...     co2_percent=0.0,   # No CO2
+        ...     n2_percent=0.0,    # No N2
+        ...     h2s_percent=0.0,   # No H2S
+        ...     h2o_percent=0.0,   # No water vapor
+        ...     deltacp=1.02,      # cp correction factor
+        ...     R=2.5              # 2.5:1 compression ratio
+        ... )
+        >>> print(f"Required horsepower: {horsepower:.0f} HP")
+        
+        >>> # Get all calculated values
+        >>> hp, vol_eff, pd, R, k, z = calculate_compressor_stage_hp(
+        ...     qg=75.0, ps=800, Ts=120, ec=0.90, C=0.04, gamma_g=0.70,
+        ...     co2_percent=1.0, n2_percent=0.5, h2s_percent=0.0, h2o_percent=0.0,
+        ...     deltacp=1.05, pd=2000, return_all_vals=True
+        ... )
+        >>> print(f"HP: {hp:.0f}, Vol Eff: {vol_eff:.3f}, k: {k:.3f}, z: {z:.3f}")
+        
+        >>> # Sour gas with impurities
+        >>> horsepower = calculate_compressor_stage_hp(
+        ...     qg=30.0, ps=400, Ts=90, ec=0.82, C=0.06, gamma_g=0.68,
+        ...     co2_percent=5.0, n2_percent=3.0, h2s_percent=2.0, h2o_percent=0.5,
+        ...     deltacp=1.08, R=3.0
+        ... )
+        
+        >>> # Manual z-factor for out-of-bounds gas specific gravity
+        >>> horsepower = calculate_compressor_stage_hp(
+        ...     qg=40.0, ps=600, Ts=110, ec=0.88, C=0.05, gamma_g=0.45,  # Low SG
+        ...     co2_percent=0.0, n2_percent=0.0, h2s_percent=0.0, h2o_percent=0.0,
+        ...     deltacp=1.03, R=2.8, z_factor=0.92  # Manual z-factor
+        ... )
+    
+    Applications:
+        - Compressor sizing and selection
+        - Process design and optimization  
+        - Economic analysis of compression systems
+        - Performance evaluation and troubleshooting
+        - Multi-stage compression system design
+    
+    Design Considerations:
+        - Higher compression ratios reduce volumetric efficiency
+        - Gas composition significantly affects required horsepower
+        - Mechanical efficiency varies with compressor type and size
+        - Clearance coefficient impacts volumetric efficiency in reciprocating units
+        - Temperature rise during compression affects downstream equipment design
+    
+    Validation:
+        - Results should be compared with manufacturer performance curves
+        - Volumetric efficiency should be reasonable (typically 0.70-0.95)
+        - Power requirements should account for process conditions
+        - Consider safety factors for equipment sizing
+    
+    Notes:
+        - Function converts temperature to Rankine internally
+        - Uses real gas properties for accurate calculations
+        - Clearance effects only apply to reciprocating compressors
+        - For centrifugal compressors, set clearance coefficient C = 0
+        - Heat capacity correction factor accounts for gas composition effects
+        - Results represent theoretical power; actual power may be higher
+    
+    References:
+        - Campbell, J.M. (2001). Gas Conditioning and Processing
+        - Brown, R.N. (2005). Compressors: Selection and Sizing  
+        - GPSA Engineering Data Book (2012). Gas Processing Suppliers Association
+        - Ludwig, E.E. (2001). Applied Process Design for Chemical and Petrochemical Plants
+    """
+    Ts = Ts + 459.67  # Convert to Rankine
+    if pd is None:
+        if R is None:
+            raise ValueError("Either pd or R must be provided.")
+        pd = R * ps
+    
+    # Calculate z factor
+    # Calculations use the intake conditions | This may be wrong, I need to ask
+    if z_factor is not None:
+        z = z_factor
+        print(f"Using manual z-factor: {z:.4f}")
+    else:
+        from utpgetools.utilities_package import gas_properties_calculation
+        
+        try:
+            properties = gas_properties_calculation(gravity=gamma_g,
+                                                    co2_percent=co2_percent,
+                                                    n2_percent=n2_percent,
+                                                    h2s_percent=h2s_percent,
+                                                    h2o_percent=h2o_percent,
+                                                    pressure_psi=ps,
+                                                    temperature_f=Ts - 459.67,
+                                                    )
+            z = properties['z_factors'][-1]
+        except TypeError as e:
+            if "complex" in str(e).lower():
+                # Calculate and display reduced properties for debugging
+                Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2  # Critical temperature in Rankine
+                Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2   # Critical pressure in psia
+                Tr = Ts / Tpc
+                Pr = ps / Ppc
+                
+                print(f"Reduced Temperature (Tr): {Tr:.3f}")
+                print(f"Reduced Pressure (Pr): {Pr:.3f}")
+                
+                raise ValueError(
+                    f"Gas specific gravity ({gamma_g:.3f}) is out of bounds for the gas property correlation. "
+                    f"This typically occurs when gamma_g < 0.55 or > 0.75, or when operating conditions "
+                    f"result in reduced temperature/pressure outside correlation validity range. "
+                    f"Please manually provide the z-factor using the 'z_factor' parameter or consult "
+                    f"the Standing-Katz compressibility chart for the appropriate z-factor."
+                ) from None
+            else:
+                raise e
+
+    gamma_array = np.array([0.6, 0.7, 0.8, 0.9])
+    cpst = np.array([29*0.6*(3.89*10**(-4)*Ts + 0.4872),
+                 29*0.7*(4.17*10**(-4)*Ts + 0.4698),
+                 29*0.8*(4.44*10**(-4)*Ts + 0.445),
+                 29*0.9*(5.0*10**(-4)*Ts + 0.4218)])
+    coeffs = np.polyfit(gamma_array, cpst, 1)
+    cpst = np.polyval(coeffs, gamma_g)
+
+    Tr = Ts / (169.2 + 349.5*gamma_g - 74*gamma_g**2)
+    Pr = ps / (756.8 - 131*gamma_g - 3.6*gamma_g**2)
+    print(f"Tr: {Tr:.3f}, Pr: {Pr:.3f}")
+    if deltacp is None:
+        print("Please provide cp correction factor")
+        return
+    cp = cpst * deltacp
+    k = cp / (cp - 1.986)
+    # Calculate volumetric efficiency
+    p2 = pd
+    p1 = ps
+    ev = 1 - C*((p2/p1) ** (1/k) - 1)
+
+    # Calculate horsepower
+    P = (0.08584 * (k/(k-1)) * Ts * ((pd/ps)**(z*(k-1)/k) - 1) * qg / ec / ev)
+    
+    if return_all_vals is None:
+        return P
+    else:
+        return P, ev, pd, R, k, z
