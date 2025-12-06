@@ -507,228 +507,447 @@ def calculate_compressor_stage_hp(qg,
                                   deltacp=None,
                                   pd=None,
                                   R=None,
-                                  z_factor=None,
-                                  return_all_vals=None):
+                                  return_all_vals=None,
+                                  Tpc_override=None,
+                                  Ppc_override=None,
+                                  component=None):
     """
     Calculate the horsepower required for a single compressor stage in gas compression.
     
     This function computes the theoretical horsepower needed to compress natural gas
-    from suction to discharge conditions in a reciprocating or centrifugal compressor.
-    The calculation accounts for gas properties, compression efficiency, volumetric
-    efficiency, and non-ideal gas behavior using real gas equations of state.
+    from suction to discharge conditions. It handles both z-factor calculations at
+    suction and discharge conditions, with robust error handling and fallback methods.
     
     Args:
         qg (float): Gas flow rate at standard conditions in MMSCF/D.
-            Million standard cubic feet per day of gas to be compressed.
         ps (float): Suction pressure at compressor inlet in psia.
-            The absolute pressure of gas entering the compressor stage.
         Ts (float): Suction temperature at compressor inlet in degrees Fahrenheit (°F).
-            The temperature of gas entering the compressor stage.
-        ec (float): Compressor mechanical efficiency as decimal (dimensionless).
-            Overall mechanical efficiency of the compressor unit, typically 0.80-0.95.
-            Accounts for mechanical losses in driver, gearbox, and compressor.
-        C (float): Clearance coefficient (dimensionless).
-            Ratio of clearance volume to swept volume in reciprocating compressors.
-            Typical values: 0.03-0.10 (3%-10%). Use 0.05 as default for most applications.
-        gamma_g (float): Gas specific gravity (dimensionless, relative to air).
-            Specific gravity of the gas mixture relative to air (air = 1.0).
-            Typical values for natural gas: 0.55-0.75.
+        ec (float): Compressor mechanical efficiency as decimal (0.80-0.95).
+        C (float): Clearance coefficient (0.03-0.10), typically 0.05.
+        gamma_g (float): Gas specific gravity (relative to air, typically 0.55-0.75).
         co2_percent (float): Carbon dioxide mole percentage in gas.
-            CO2 content as mole percent. Affects gas properties significantly.
         n2_percent (float): Nitrogen mole percentage in gas.
-            N2 content as mole percent.
         h2s_percent (float): Hydrogen sulfide mole percentage in gas.
-            H2S content as mole percent. Important for sour gas applications.
         h2o_percent (float): Water vapor mole percentage in gas.
-            H2O content as mole percent.
-        deltacp (float, optional): Heat capacity correction factor (dimensionless).
-            Correction factor for specific heat calculations. Required input.
-            If None, function will print message and return without calculation.
-        pd (float, optional): Discharge pressure in psia.
-            Target discharge pressure from the compressor stage.
-            Either pd or R must be provided.
-        R (float, optional): Compression ratio (dimensionless).
-            Ratio of discharge pressure to suction pressure (pd/ps).
-            Either pd or R must be provided.
-        z_factor (float, optional): Manual gas compressibility factor override.
-            If provided, bypasses automatic z-factor calculation from gas properties.
-            Use this when gas specific gravity is outside correlation bounds.
-            Typical values range from 0.7 to 1.2 for most conditions.
-        return_all_vals (bool, optional): Return additional calculated values.
-            If None (default), returns only horsepower.
-            If True, returns tuple of all calculated parameters.
+        deltacp (float, optional): Heat capacity correction factor (required).
+        pd (float, optional): Discharge pressure in psia (either pd or R required).
+        R (float, optional): Compression ratio (either pd or R required).
+        return_all_vals (bool, optional): If True, returns additional parameters.
+        Tpc_override (float, optional): Override critical temperature in °R.
+        Ppc_override (float, optional): Override critical pressure in psia.
+        component (arraylike, optional): Component fractions [N2, CO2, H2S, C1-C7+].
     
     Returns:
-        float or tuple: 
-            - If return_all_vals is None: Horsepower in HP
-            - If return_all_vals is True: Tuple of (horsepower in HP, volumetric efficiency, 
-              discharge pressure in psia, compression ratio, isentropic exponent k, 
-              gas compressibility factor z)
+        float or tuple: Horsepower in HP, or tuple of all calculated values if return_all_vals=True.
     
     Raises:
-        ValueError: If neither pd nor R is provided.
-        SystemExit: If deltacp is None (function prints message and returns None).
-    
-    Theory:
-        The horsepower calculation uses the polytropic compression equation:
-        
-        HP = 0.08584 * (k/(k-1)) * Ts * ((pd/ps)^(z*(k-1)/k) - 1) * qg / (ec * ev)
-        
-        Where:
-        - k = specific heat ratio (cp/cv)
-        - z = gas compressibility factor at suction conditions
-        - ev = volumetric efficiency
-        
-        Volumetric efficiency accounts for clearance volume effects:
-        ev = 1 - C * ((p2/p1)^(1/k) - 1)
-        
-        Gas properties are calculated using real gas correlations accounting
-        for gas composition and non-ideal behavior.
-    
-    Examples:
-        >>> # Basic compression calculation with sweet gas
-        >>> horsepower = calculate_compressor_stage_hp(
-        ...     qg=50.0,           # 50 MMSCF/D
-        ...     ps=500,            # 500 psia suction
-        ...     Ts=100,            # 100°F suction temp
-        ...     ec=0.85,           # 85% mechanical efficiency
-        ...     C=0.05,            # 5% clearance
-        ...     gamma_g=0.65,      # 0.65 gas gravity
-        ...     co2_percent=0.0,   # No CO2
-        ...     n2_percent=0.0,    # No N2
-        ...     h2s_percent=0.0,   # No H2S
-        ...     h2o_percent=0.0,   # No water vapor
-        ...     deltacp=1.02,      # cp correction factor
-        ...     R=2.5              # 2.5:1 compression ratio
-        ... )
-        >>> print(f"Required horsepower: {horsepower:.0f} HP")
-        
-        >>> # Get all calculated values
-        >>> hp, vol_eff, pd, R, k, z = calculate_compressor_stage_hp(
-        ...     qg=75.0, ps=800, Ts=120, ec=0.90, C=0.04, gamma_g=0.70,
-        ...     co2_percent=1.0, n2_percent=0.5, h2s_percent=0.0, h2o_percent=0.0,
-        ...     deltacp=1.05, pd=2000, return_all_vals=True
-        ... )
-        >>> print(f"HP: {hp:.0f}, Vol Eff: {vol_eff:.3f}, k: {k:.3f}, z: {z:.3f}")
-        
-        >>> # Sour gas with impurities
-        >>> horsepower = calculate_compressor_stage_hp(
-        ...     qg=30.0, ps=400, Ts=90, ec=0.82, C=0.06, gamma_g=0.68,
-        ...     co2_percent=5.0, n2_percent=3.0, h2s_percent=2.0, h2o_percent=0.5,
-        ...     deltacp=1.08, R=3.0
-        ... )
-        
-        >>> # Manual z-factor for out-of-bounds gas specific gravity
-        >>> horsepower = calculate_compressor_stage_hp(
-        ...     qg=40.0, ps=600, Ts=110, ec=0.88, C=0.05, gamma_g=0.45,  # Low SG
-        ...     co2_percent=0.0, n2_percent=0.0, h2s_percent=0.0, h2o_percent=0.0,
-        ...     deltacp=1.03, R=2.8, z_factor=0.92  # Manual z-factor
-        ... )
-    
-    Applications:
-        - Compressor sizing and selection
-        - Process design and optimization  
-        - Economic analysis of compression systems
-        - Performance evaluation and troubleshooting
-        - Multi-stage compression system design
-    
-    Design Considerations:
-        - Higher compression ratios reduce volumetric efficiency
-        - Gas composition significantly affects required horsepower
-        - Mechanical efficiency varies with compressor type and size
-        - Clearance coefficient impacts volumetric efficiency in reciprocating units
-        - Temperature rise during compression affects downstream equipment design
-    
-    Validation:
-        - Results should be compared with manufacturer performance curves
-        - Volumetric efficiency should be reasonable (typically 0.70-0.95)
-        - Power requirements should account for process conditions
-        - Consider safety factors for equipment sizing
-    
-    Notes:
-        - Function converts temperature to Rankine internally
-        - Uses real gas properties for accurate calculations
-        - Clearance effects only apply to reciprocating compressors
-        - For centrifugal compressors, set clearance coefficient C = 0
-        - Heat capacity correction factor accounts for gas composition effects
-        - Results represent theoretical power; actual power may be higher
-    
-    References:
-        - Campbell, J.M. (2001). Gas Conditioning and Processing
-        - Brown, R.N. (2005). Compressors: Selection and Sizing  
-        - GPSA Engineering Data Book (2012). Gas Processing Suppliers Association
-        - Ludwig, E.E. (2001). Applied Process Design for Chemical and Petrochemical Plants
+        ValueError: If required parameters missing or calculations fail.
     """
-    Ts = Ts + 459.67  # Convert to Rankine
+    
+    # ===== INPUT VALIDATION AND PREPROCESSING =====
+        
     if pd is None:
         if R is None:
             raise ValueError("Either pd or R must be provided.")
         pd = R * ps
     
-    # Calculate z factor
-    # Calculations use the intake conditions | This may be wrong, I need to ask
-    if z_factor is not None:
-        z = z_factor
-        print(f"Using manual z-factor: {z:.4f}")
+    # Convert temperature to absolute scale
+    Ts = Ts + 459.67  # Convert °F to °R
+    
+    # ===== CRITICAL PROPERTIES CALCULATION =====
+    # Component property arrays for compositional analysis
+
+    # Values from Natural Gas Engineering Handbook
+    critical_pressures = [493, 1071, 1306, 668, 708, 616, 529, 551, 490, 489, 437, 332]
+    critical_temperatures = [227, 548, 672, 343, 550, 666, 735, 765, 829, 845, 913, 1070]
+    cp_values = [6.96171216, 8.77344105, 1.1765*29*.238, 8.45882846, 12.33516566, 
+                 17.13558525, 22.53395584, 22.50485724, 27.64697513, 28.05152977, 
+                 33.34002168, 49.3124352]
+
+    # Determine critical properties calculation method
+    if component is not None:
+        # Use detailed composition if provided
+        Tpc = np.sum(np.array(critical_temperatures) * np.array(component))
+        Ppc = np.sum(np.array(critical_pressures) * np.array(component))
+        cpst = np.sum(np.array(cp_values) * np.array(component))
+        co2 = component[1]
+        h2s = component[2]
+    elif Tpc_override is not None and Ppc_override is not None:
+        # Use manually specified critical properties
+        Tpc = Tpc_override
+        Ppc = Ppc_override
+        print(f"Using override critical properties: Tpc = {Tpc:.1f} °R, Ppc = {Ppc:.1f} psia")
     else:
-        from utpgetools.utilities_package import gas_properties_calculation
+        # Calculate using gas specific gravity correlations
+        Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2
+        Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2
+        co2 = co2_percent / 100
+        h2s = h2s_percent / 100
+        print(f"Using calculated critical properties: Tpc = {Tpc:.1f} °R, Ppc = {Ppc:.1f} psia")
+    
+    # Apply Wichert-Aziz correction for sour gas components
+    correction_factor = 120 * ((co2 + h2s)**0.9 + (co2 + h2s)**1.6) + (h2s**0.5 + h2s**4)
+    Tpc_corr = Tpc - correction_factor
+    Ppc_corr = (Ppc * Tpc_corr) / (Tpc + h2s * (1-h2s) * correction_factor)
+    Tpc = Tpc_corr
+    Ppc = Ppc_corr
+    
+    # Calculate pseudo-reduced properties for diagnostics
+    Tr = Ts / Tpc
+    Pr = ps / Ppc
+    print(f"Corrected Tr: {Tr:.3f}, Corrected Pr: {Pr:.3f}")
+
+    # ===== Z-FACTOR CALCULATION METHODS =====
+    from utpgetools.utilities_package import gas_properties_calculation
+    
+    def calculate_z_factor_standing_katz(pressure, temperature_R, Tpc, Ppc):
+        """
+        Calculate z-factor using Standing-Katz iterative method as fallback.
         
-        try:
-            properties = gas_properties_calculation(gravity=gamma_g,
-                                                    co2_percent=co2_percent,
-                                                    n2_percent=n2_percent,
-                                                    h2s_percent=h2s_percent,
-                                                    h2o_percent=h2o_percent,
-                                                    pressure_psi=ps,
-                                                    temperature_f=Ts - 459.67,
-                                                    )
-            z = properties['z_factors'][-1]
-        except TypeError as e:
-            if "complex" in str(e).lower():
-                # Calculate and display reduced properties for debugging
-                Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2  # Critical temperature in Rankine
-                Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2   # Critical pressure in psia
-                Tr = Ts / Tpc
-                Pr = ps / Ppc
+        This method provides a robust fallback when primary calculations fail,
+        using the classical Standing-Katz correlation with Newton-Raphson iteration.
+        """
+        Tr = temperature_R / Tpc
+        Pr = pressure / Ppc
+        
+        # Initialize iteration parameters
+        rho_r = 0.1  # Initial guess for reduced density
+        max_iterations = 1000
+        tolerance = 1e-6
+        
+        for iteration in range(max_iterations):
+            # Standing-Katz equation for compressibility factor
+            # Dranchuk, P.M. and Abou-Kassem, J.H.: "Calculations of z-Factors for Natural Gases Using Equations of State," J. Cdn. Pet. Tech. (July-Sept. 1975) 34-36.
+            Z1 = (1 + (0.3265 - 1.0700/Tr - 0.5339/Tr**3 + 0.01569/Tr**4 - 0.05165/Tr**5) * rho_r
+                  + (0.5475 - 0.7361/Tr + 0.1844/Tr**2) * rho_r**2
+                  - 0.1056 * (-0.7361/Tr + 0.1844/Tr**2) * rho_r**5
+                  + 0.6134 * (1+0.7210*rho_r**2) * (rho_r**2/Tr**3) * np.exp(-0.7210*rho_r**2))
+            
+            # Equation of state relationship
+            Z2 = 0.27 * Pr / rho_r / Tr
+            
+            # Check convergence based on z-factor precision
+            if iteration > 0:
+                if abs(Z1 - z_last) < 0.001:  # First 3 digits unchanged
+                    break
+            z_last = Z1
+            
+            # Newton-Raphson iteration for improved convergence
+            error = Z1 - Z2
+            if abs(error) < tolerance:
+                break
                 
-                print(f"Reduced Temperature (Tr): {Tr:.3f}")
-                print(f"Reduced Pressure (Pr): {Pr:.3f}")
-                
-                raise ValueError(
-                    f"Gas specific gravity ({gamma_g:.3f}) is out of bounds for the gas property correlation. "
-                    f"This typically occurs when gamma_g < 0.55 or > 0.75, or when operating conditions "
-                    f"result in reduced temperature/pressure outside correlation validity range. "
-                    f"Please manually provide the z-factor using the 'z_factor' parameter or consult "
-                    f"the Standing-Katz compressibility chart for the appropriate z-factor."
-                ) from None
+            # Calculate derivative numerically
+            drho = 1e-6
+            rho_r_plus = rho_r + drho
+            Z1_plus = (1 + (0.3265 - 1.0700/Tr - 0.5339/Tr**3 + 0.01569/Tr**4 - 0.05165/Tr**5) * rho_r_plus
+                       + (0.5475 - 0.7361/Tr + 0.1844/Tr**2) * rho_r_plus**2
+                       - 0.1056 * (-0.7361/Tr + 0.1844/Tr**2) * rho_r_plus**5
+                       + 0.6134 * (1+0.7210*rho_r_plus**2) * (rho_r_plus**2/Tr**3) * np.exp(-0.7210*rho_r_plus**2))
+            Z2_plus = 0.27 * Pr / rho_r_plus / Tr
+            error_plus = Z1_plus - Z2_plus
+            
+            derror_drho = (error_plus - error) / drho
+            
+            # Update reduced density with convergence safeguards
+            if abs(derror_drho) > 1e-12:
+                rho_r = rho_r - error / derror_drho
             else:
-                raise e
+                rho_r = rho_r * 1.1  # Simple adjustment if derivative is too small
+                
+            rho_r = max(rho_r, 0.001)  # Ensure positive values
+        
+        return Z1
 
-    gamma_array = np.array([0.6, 0.7, 0.8, 0.9])
-    cpst = np.array([29*0.6*(3.89*10**(-4)*Ts + 0.4872),
-                 29*0.7*(4.17*10**(-4)*Ts + 0.4698),
-                 29*0.8*(4.44*10**(-4)*Ts + 0.445),
-                 29*0.9*(5.0*10**(-4)*Ts + 0.4218)])
-    coeffs = np.polyfit(gamma_array, cpst, 1)
-    cpst = np.polyval(coeffs, gamma_g)
+    # ===== Z1 CALCULATION (SUCTION CONDITIONS) =====
+    # Primary method: Use utilities package for enhanced accuracy
+    try:
+        properties = gas_properties_calculation(gravity=gamma_g,
+                                                co2_percent=co2_percent,
+                                                n2_percent=n2_percent,
+                                                h2s_percent=h2s_percent,
+                                                h2o_percent=h2o_percent,
+                                                pressure_psi=ps,
+                                                temperature_f=Ts - 459.67)
+        z1 = properties['z_factors'][-1]
+        
+        # Validate result quality
+        if np.isnan(z1) or np.iscomplexobj(z1):
+            raise ValueError(f"Primary z1 calculation returned invalid result: {z1}")
+            
+        print(f"Using primary z1-factor calculation (suction): {z1:.4f}")
+        
+    except (TypeError, ValueError) as e:
+        # Fallback method: Standing-Katz correlation
+        if "complex" in str(e).lower() or "invalid result" in str(e).lower():
+            print("Primary z1-factor calculation failed, using Standing-Katz fallback method...")
+            z1 = calculate_z_factor_standing_katz(ps, Ts, Tpc, Ppc)
+            
+            # Validate fallback result
+            if np.isnan(z1) or np.iscomplexobj(z1):
+                raise ValueError(f"Both primary and Standing-Katz z1 calculations failed. "
+                               f"Gas specific gravity ({gamma_g:.3f}) may be outside valid range. "
+                               f"Typical natural gas range: 0.55-0.75")
+            
+            print(f"Standing-Katz z1-factor (suction): {z1:.4f}")
+        else:
+            raise e
 
-    Tr = Ts / (169.2 + 349.5*gamma_g - 74*gamma_g**2)
-    Pr = ps / (756.8 - 131*gamma_g - 3.6*gamma_g**2)
-    print(f"Tr: {Tr:.3f}, Pr: {Pr:.3f}")
+    # ===== HEAT CAPACITY AND ISENTROPIC EXPONENT CALCULATION =====
+    # Calculate standard heat capacity if component analysis not used
+    if component is None:
+        gamma_array = np.array([0.6, 0.7, 0.8, 0.9])
+        cpst_array = np.array([29*0.6*(3.89e-4*Ts + 0.4872),
+                              29*0.7*(4.17e-4*Ts + 0.4698),
+                              29*0.8*(4.44e-4*Ts + 0.445),
+                              29*0.9*(5.0e-4*Ts + 0.4218)])
+        # Linear interpolation for intermediate specific gravities
+        coeffs = np.polyfit(gamma_array, cpst_array, 1)
+        cpst = np.polyval(coeffs, gamma_g)
+    
+    # Apply heat capacity correction (addition method confirmed correct)
     if deltacp is None:
         print("Please provide cp correction factor")
         return
-    cp = cpst * deltacp
-    k = cp / (cp - 1.986)
-    # Calculate volumetric efficiency
-    p2 = pd
-    p1 = ps
-    ev = 1 - C*((p2/p1) ** (1/k) - 1)
-
-    # Calculate horsepower
-    P = (0.08584 * (k/(k-1)) * Ts * ((pd/ps)**(z*(k-1)/k) - 1) * qg / ec / ev)
+    cp = cpst + deltacp
+    print(f"cpst = {cpst:.4f} Btu/lb-R, cp corrected = {cp:.4f} Btu/lb-R")
     
+    # Calculate isentropic exponent
+    k = cp / (cp - 1.986)  # 1.986 = universal gas constant in Btu/lb-mole-R / molecular weight
+
+    # ===== Z2 CALCULATION (DISCHARGE CONDITIONS) =====
+    # Calculate isentropic discharge temperature
+    Td = Ts * (pd/ps)**((k-1)/k)
+    
+    # Primary method for z2
+    try:
+        properties = gas_properties_calculation(gravity=gamma_g,
+                                                co2_percent=co2_percent,
+                                                n2_percent=n2_percent,
+                                                h2s_percent=h2s_percent,
+                                                h2o_percent=h2o_percent,
+                                                pressure_psi=pd,
+                                                temperature_f=Td - 459.67)
+        z2 = properties['z_factors'][-1]
+        
+        # Validate result quality
+        if np.isnan(z2) or np.iscomplexobj(z2):
+            raise ValueError(f"Primary z2 calculation returned invalid result: {z2}")
+            
+        print(f"Using primary z2-factor calculation (discharge): {z2:.4f}")
+        
+    except (TypeError, ValueError) as e:
+        # Fallback method for discharge conditions
+        if "complex" in str(e).lower() or "invalid result" in str(e).lower():
+            print("Primary z2-factor calculation failed, using Standing-Katz fallback method...")
+            z2 = calculate_z_factor_standing_katz(pd, Td, Tpc, Ppc)
+            
+            # Validate fallback result
+            if np.isnan(z2) or np.iscomplexobj(z2):
+                raise ValueError(f"Both primary and Standing-Katz z2 calculations failed. "
+                               f"Discharge conditions: P={pd:.1f} psia, T={Td-459.67:.1f}°F. "
+                               f"Gas specific gravity ({gamma_g:.3f}) may be outside valid range. "
+                               f"Consider using more realistic gas properties or different correlations.")
+            
+            print(f"Standing-Katz z2-factor (discharge): {z2:.4f}")
+        else:
+            raise e
+
+    # ===== VOLUMETRIC EFFICIENCY CALCULATION =====
+    # Calculate compression ratio if not already defined
+    if R is None:
+        R = pd / ps
+    
+    # Updated volumetric efficiency equation accounting for z-factor effects
+    ev = 1 - 0.05 - R/100 - C * (R**(1/k) * (z2/z1) - 1)
+
+    # ===== HORSEPOWER CALCULATION =====
+    # Calculate theoretical horsepower using gas property relationships
+    P = 0.08584 * (k/(k-1)) * Ts * ((pd/ps)**(z1*(k-1)/k) - 1) * qg / ec / ev
+
+    # ===== FINAL RESULT VALIDATION =====
+    # Print final reduced properties for deltacp correction factor reference
+    print(f"Final reduced properties for deltacp reference: Tr = {Tr:.3f}, Pr = {Pr:.3f}")
+    
+    # Ensure all results are physically meaningful
+    if np.isnan(P) or np.iscomplexobj(P):
+        raise ValueError(f"Horsepower calculation resulted in invalid value: {P}. "
+                        f"Check input parameters: gamma_g={gamma_g:.3f}, deltacp={deltacp}")
+    
+    if np.isnan(ev) or np.iscomplexobj(ev):
+        raise ValueError(f"Volumetric efficiency calculation resulted in invalid value: {ev}. "
+                        f"z1={z1:.4f}, z2={z2:.4f}, R={R:.2f}")
+    
+    # Return results based on user preference
     if return_all_vals is None:
         return P
     else:
-        return P, ev, pd, R, k, z
+        return P, ev, pd, R, k, z1
+
+
+def standing_katz(gamma_g, pressure, temperature_f, component=None, co2_percent=0, h2s_percent=0, 
+                  n2_percent=0, h2o_percent=0, Tpc_override=None, Ppc_override=None, deltacp=None):
+    """
+    Calculate z-factor using Standing-Katz iterative method with component-based critical properties.
+    
+    This function provides a standalone implementation of the Standing-Katz correlation
+    for calculating gas compressibility factors. It includes component-based critical
+    property calculations using Kay's rule or correlations based on gas specific gravity.
+    
+    Args:
+        gamma_g (float): Gas specific gravity (air = 1.0)
+        pressure (float): Pressure in psia
+        temperature_f (float): Temperature in °F
+        component (list, optional): Gas composition as mole fractions for 12 components:
+            [C1, CO2, H2S, N2, C2, C3, iC4, nC4, iC5, nC5, C6, C7+]
+        co2_percent (float): CO2 content in mol% (0-100)
+        h2s_percent (float): H2S content in mol% (0-100)
+        n2_percent (float): N2 content in mol% (0-100)
+        h2o_percent (float): H2O content in mol% (0-100)
+        Tpc_override (float, optional): Override pseudo-critical temperature in °R
+        Ppc_override (float, optional): Override pseudo-critical pressure in psia
+        deltacp (float, optional): Heat capacity correction factor. If None, will prompt for user input
+        
+    Returns:
+        dict: Dictionary containing:
+            - 'z_factor': Calculated compressibility factor
+            - 'Tpc': Pseudo-critical temperature in °R
+            - 'Ppc': Pseudo-critical pressure in psia
+            - 'Tr': Reduced temperature
+            - 'Pr': Reduced pressure
+            
+    References:
+        - Standing, M.B. and Katz, D.L. (1942). Density of Natural Gases
+        - Dranchuk, P.M. and Abou-Kassem, J.H. (1975). Calculations of z-Factors for Natural Gases Using Equations of State
+        - Katz, D.L. and McGraw-Hill (1959). Handbook of Natural Gas Engineering
+    """
+    
+    # Convert temperature to absolute scale
+    temperature_R = temperature_f + 459.67  # Convert °F to °R
+    
+    # ===== CRITICAL PROPERTIES CALCULATION =====
+    # Component property arrays for compositional analysis
+    # Values from Natural Gas Engineering Handbook
+    critical_pressures = [493, 1071, 1306, 668, 708, 616, 529, 551, 490, 489, 437, 332]
+    critical_temperatures = [227, 548, 672, 343, 550, 666, 735, 765, 829, 845, 913, 1070]
+    cp_values = [6.96171216, 8.77344105, 1.1765*29*.238, 8.45882846, 12.33516566, 
+                 17.13558525, 22.53395584, 22.50485724, 27.64697513, 28.05152977, 
+                 33.34002168, 49.3124352]
+
+    # Determine critical properties calculation method
+    if component is not None:
+        # Use detailed composition if provided
+        Tpc = np.sum(np.array(critical_temperatures) * np.array(component))
+        Ppc = np.sum(np.array(critical_pressures) * np.array(component))
+        cpst = np.sum(np.array(cp_values) * np.array(component))
+        co2 = component[1]
+        h2s = component[2]
+    elif Tpc_override is not None and Ppc_override is not None:
+        # Use manually specified critical properties
+        Tpc = Tpc_override
+        Ppc = Ppc_override
+        co2 = co2_percent / 100
+        h2s = h2s_percent / 100
+    else:
+        # Calculate using gas specific gravity correlations
+        Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2
+        Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2
+        co2 = co2_percent / 100
+        h2s = h2s_percent / 100
+    
+    # Apply Wichert-Aziz correction for sour gas components
+    correction_factor = 120 * ((co2 + h2s)**0.9 + (co2 + h2s)**1.6) + (h2s**0.5 + h2s**4)
+    Tpc_corr = Tpc - correction_factor
+    Ppc_corr = (Ppc * Tpc_corr) / (Tpc + h2s * (1-h2s) * correction_factor)
+    Tpc = Tpc_corr
+    Ppc = Ppc_corr
+    
+    # Calculate pseudo-reduced properties
+    Tr = temperature_R / Tpc
+    Pr = pressure / Ppc
+    
+    # Handle deltacp input
+    if deltacp is None:
+        # Print reduced properties for deltacp determination and raise error
+        print(f"Corrected Tr: {Tr:.3f}, Corrected Pr: {Pr:.3f}")
+        raise ValueError("deltacp is required. Please determine deltacp from the reduced properties chart and re-run with deltacp parameter.")
+    
+    # ===== STANDING-KATZ ITERATIVE CALCULATION =====
+    # Initialize iteration parameters
+    rho_r = 0.1  # Initial guess for reduced density
+    max_iterations = 1000
+    tolerance = 1e-6
+    
+    for iteration in range(max_iterations):
+        # Standing-Katz equation for compressibility factor
+        # Dranchuk, P.M. and Abou-Kassem, J.H.: "Calculations of z-Factors for Natural Gases Using Equations of State," J. Cdn. Pet. Tech. (July-Sept. 1975) 34-36.
+        Z1 = (1 + (0.3265 - 1.0700/Tr - 0.5339/Tr**3 + 0.01569/Tr**4 - 0.05165/Tr**5) * rho_r
+              + (0.5475 - 0.7361/Tr + 0.1844/Tr**2) * rho_r**2
+              - 0.1056 * (-0.7361/Tr + 0.1844/Tr**2) * rho_r**5
+              + 0.6134 * (1+0.7210*rho_r**2) * (rho_r**2/Tr**3) * np.exp(-0.7210*rho_r**2))
+        
+        # Equation of state relationship
+        Z2 = 0.27 * Pr / rho_r / Tr
+        
+        # Check convergence based on z-factor precision
+        if iteration > 0:
+            if abs(Z1 - z_last) < 0.001:  # First 3 digits unchanged
+                break
+        z_last = Z1
+        
+        # Newton-Raphson iteration for improved convergence
+        error = Z1 - Z2
+        if abs(error) < tolerance:
+            break
+            
+        # Calculate derivative numerically
+        drho = 1e-6
+        rho_r_plus = rho_r + drho
+        Z1_plus = (1 + (0.3265 - 1.0700/Tr - 0.5339/Tr**3 + 0.01569/Tr**4 - 0.05165/Tr**5) * rho_r_plus
+                   + (0.5475 - 0.7361/Tr + 0.1844/Tr**2) * rho_r_plus**2
+                   - 0.1056 * (-0.7361/Tr + 0.1844/Tr**2) * rho_r_plus**5
+                   + 0.6134 * (1+0.7210*rho_r_plus**2) * (rho_r_plus**2/Tr**3) * np.exp(-0.7210*rho_r_plus**2))
+        Z2_plus = 0.27 * Pr / rho_r_plus / Tr
+        error_plus = Z1_plus - Z2_plus
+        
+        derror_drho = (error_plus - error) / drho
+        
+        # Update reduced density with convergence safeguards
+        if abs(derror_drho) > 1e-12:
+            rho_r = rho_r - error / derror_drho
+        else:
+            rho_r = rho_r * 1.1  # Simple adjustment if derivative is too small
+            
+        rho_r = max(rho_r, 0.001)  # Ensure positive values
+    
+    # Validate result
+    if np.isnan(Z1) or np.iscomplexobj(Z1):
+        raise ValueError(f"Standing-Katz calculation failed to converge for given conditions")
+    
+    # ===== HEAT CAPACITY AND ISENTROPIC EXPONENT CALCULATION =====
+    # Calculate standard heat capacity if component analysis not used
+    if component is None:
+        gamma_array = np.array([0.6, 0.7, 0.8, 0.9])
+        cpst_array = np.array([29*0.6*(3.89e-4*temperature_R + 0.4872),
+                               29*0.7*(3.89e-4*temperature_R + 0.4872),
+                               29*0.8*(3.89e-4*temperature_R + 0.4872),
+                               29*0.9*(3.89e-4*temperature_R + 0.4872)])
+        cpst = np.interp(gamma_g, gamma_array, cpst_array)
+    
+    # Apply deltacp correction
+    cp = cpst + deltacp
+    cv = cp - 1.987  # Universal gas constant in Btu/lbmol·°R
+    k = cp / cv  # Isentropic exponent
+    
+    return {
+        'z_factor': Z1,
+        'Tpc': Tpc,
+        'Ppc': Ppc,
+        'Tr': Tr,
+        'Pr': Pr,
+        'deltacp': deltacp,
+        'cp': cp,
+        'cv': cv,
+        'k': k,
+        'iterations': iteration + 1
+    }

@@ -1190,3 +1190,400 @@ def pcp_design(API,
     console.print(f"\nEstimated bearing life: [bright_red]{bearing_life:.2f}[/bright_red] years")
     console.print(f"\n[bright_cyan]bearing_life[/bright_cyan] = (bearing_load_rating / (Fr + Fb))**(10/3) * (lifetime_revolutions / pump_speed) / 1440 / 365")
     return
+def esp_design_calculation(
+    liquid_rate_bpd,
+    water_cut_fraction,
+    oil_API,
+    gas_gravity, 
+    water_gravity,
+    GLR_scf_stb,
+    pwf_psi,
+    pump_depth_ft,
+    tubing_ID_in,
+    BHT_f,
+    head_per_stage_ft,
+    hp_per_stage,
+    separator_pressure_psi=100,
+    separator_temperature_f=100,
+    wellhead_pressure_psi=None,
+    surface_temperature_f=80,
+    motor_options=None,
+    design_margin_percent=10,
+    max_stages=400,
+    pwf_measurement_depth_ft=None,
+    gas_separator_efficiency=1.0,
+):
+    """
+    Complete ESP (Electric Submersible Pump) design calculation following petroleum engineering workflow.
+    
+    This function performs comprehensive ESP design analysis including pump sizing, head calculations,
+    stage requirements, horsepower determination, and motor selection. All intermediate calculations
+    are displayed with detailed explanations following standard ESP design methodology outlined in
+    the notebook markdown cell.
+    
+    Parameters:
+    -----------
+    liquid_rate_bpd : float
+        Total liquid production rate in barrels per day (oil + water)
+    
+    water_cut_fraction : float
+        Water cut as fraction (0-1). Example: 0.6 = 60% water cut
+    
+    oil_API : float
+        Oil API gravity in degrees API
+    
+    gas_gravity : float
+        Gas specific gravity (dimensionless, relative to air)
+    
+    water_gravity : float
+        Water specific gravity (dimensionless, relative to water)
+    
+    GLR_scf_stb : float
+        Gas-liquid ratio in standard cubic feet per stock tank barrel
+    
+    pwf_psi : float
+        Bottomhole flowing pressure measured at pwf_measurement_depth_ft in psia.
+        If pwf_measurement_depth_ft is provided and differs from pump_depth_ft,
+        pressure will be translated using two-phase flow correlation.
+    
+    pump_depth_ft : float
+        Pump setting depth in feet (vertical depth)
+    
+    pwf_measurement_depth_ft : float, optional
+        Depth where pwf was measured in feet TVD. If None, assumes pwf was 
+        measured at pump depth. If different from pump_depth_ft, function
+        will calculate pressure at pump depth using two-phase flow correlation.
+    
+    tubing_ID_in : float
+        Production tubing internal diameter in inches
+    
+    BHT_f : float
+        Bottomhole temperature at pump depth in degrees Fahrenheit
+    
+    separator_pressure_psi : float, optional
+        Surface separator pressure in psia (default: 100)
+    
+    separator_temperature_f : float, optional
+        Surface separator temperature in degrees Fahrenheit (default: 100)
+    
+    wellhead_pressure_psi : float, optional
+        Wellhead pressure in psia (default: uses separator_pressure_psi)
+    
+    surface_temperature_f : float, optional
+        Surface temperature in degrees Fahrenheit (default: 80)
+    
+    head_per_stage_ft : float
+        Head delivered per pump stage in feet
+    
+    hp_per_stage : float
+        Horsepower required per pump stage in hp
+    
+    Note: Pump efficiency is calculated using the standard ESP equation:
+        efficiency = 1.7e-5 × Q × ΔPs / hp_per_stage
+        where Q is liquid rate (bpd), ΔPs is pressure per stage (psi), 
+        and hp_per_stage is horsepower per stage
+    
+    motor_options : list, optional
+        Available motor options. If None, uses standard motor ratings
+        Expected format: [{'hp': hp_rating, 'max_current': amps, 'voltage': volts}]
+    
+    design_margin_percent : float, optional
+        Design safety margin percentage (default: 10%)
+    
+    max_stages : int, optional
+        Maximum allowable number of pump stages (default: 400)
+    
+    Returns:
+    --------
+    dict
+        Comprehensive ESP design results containing all calculated parameters
+    
+    ESP Design Process (Following Notebook Steps):
+    ---------------------------------------------
+    1. Determine size - Calculate required flow rates and fluid properties
+    2. Determine required output - Compute discharge pressure and total dynamic head  
+    3. Pick a pump within operating range - Select pump based on performance curves
+    4. Head/stage & HP/stage - Interpolate pump performance data
+    5. Calculate deltaPs - Use head * gamma_f * 0.433 conversion
+    6. Calculate deltaP - Compute discharge - Pwf pressure difference
+    7. Calculate number of stages - Determine stages needed with design margin
+    8. Calculate required horsepower - Compute total BHP and motor requirements
+    9. Pick a motor - Select appropriate motor from available options
+    
+    Examples:
+    ---------
+    >>> # Using your notebook data
+    >>> from utpgetools.artificial_lift import esp_design_calculation
+    >>> 
+    >>> # ESP Case 1 - 10 deg DLS limit - Set at 3200ft TVD
+    >>> results = esp_design_calculation(
+    ...     liquid_rate_bpd=56410,      # From df['Ql [bbl/d]'][0]
+    ...     water_cut_fraction=0.59,     # From WOR calculation
+    ...     oil_API=38,
+    ...     gas_gravity=0.7, 
+    ...     water_gravity=1.02,
+    ...     GLR_scf_stb=147,            # From df['GLR [scf/bbl]'][0]
+    ...     pwf_psi=2645,               # From df['Pwf [psi]'][0]
+    ...     pump_depth_ft=3200,         # ESP Case 1 depth
+    ...     tubing_ID_in=2.441,
+    ...     BHT_f=175,
+    ...     head_per_stage_ft=200,      # Pump specification
+    ...     hp_per_stage=8.5            # Pump specification
+    ... )
+    """
+    from utpgetools.utilities_package import oil_properties_calculation, two_phase_flow
+    
+    console.print("\n" + "="*80)
+    console.print("[bold bright_blue]ESP DESIGN CALCULATION[/bold bright_blue]")
+    console.print("="*80)
+    
+    # Set defaults if not provided
+    if wellhead_pressure_psi is None:
+        wellhead_pressure_psi = separator_pressure_psi
+    
+    # Step 1: Input Summary and Validation (Determine size)
+    console.print(f"\n[bold bright_cyan]STEP 1: Input Parameters & Pump Specifications[/bold bright_cyan]")
+    
+    oil_rate_bpd = liquid_rate_bpd * (1 - water_cut_fraction)
+    water_rate_bpd = liquid_rate_bpd * water_cut_fraction
+    
+    GLR_scf_stb = GLR_scf_stb * (1 - gas_separator_efficiency)  # Adjust GLR for gas separator efficiency
+
+    # Production Data
+    console.print(f"Production Data:")
+    console.print(f"  Liquid Rate: [bright_red]{liquid_rate_bpd:,.0f}[/bright_red] BPD (Oil: {oil_rate_bpd:,.0f}, Water: {water_rate_bpd:,.0f})")
+    console.print(f"  Water Cut: [bright_red]{water_cut_fraction*100:.1f}[/bright_red]%")
+    console.print(f"  GLR: [bright_red]{GLR_scf_stb:.0f}[/bright_red] scf/stb")
+    console.print(f"  Oil API: [bright_red]{oil_API:.1f}[/bright_red] °API")
+    
+    # Calculate WOR from water cut
+    if water_cut_fraction >= 1.0:
+        raise ValueError("Water cut cannot be 100% or greater")
+    WOR = water_cut_fraction / (1 - water_cut_fraction)
+    
+    # Calculate fluid properties early for pressure translation
+    oil_sg = 141.5 / (131.5 + oil_API)
+    fluid_sg = oil_sg * (1 - water_cut_fraction) + water_gravity * water_cut_fraction
+    
+    # Pressure Translation: Calculate pump intake pressure if pwf measured at different depth
+    pump_intake_pressure_psi = pwf_psi
+    if pwf_measurement_depth_ft is not None and abs(pwf_measurement_depth_ft - pump_depth_ft) > 1:
+        console.print(f"\n[bold bright_yellow]PRESSURE TRANSLATION[/bold bright_yellow]")
+        console.print(f"Pwf measured at: [bright_red]{pwf_measurement_depth_ft:,.0f}[/bright_red] ft TVD")
+        console.print(f"Pump set at: [bright_red]{pump_depth_ft:,.0f}[/bright_red] ft TVD")
+        console.print(f"Calculating pressure at pump depth using two-phase flow correlation...")
+        
+        # Calculate depth difference
+        depth_diff = abs(pump_depth_ft - pwf_measurement_depth_ft)
+        
+        # Use hydrostatic approximation with mixed fluid density as primary method
+        # This is more reliable for ESP design than complex two-phase flow between arbitrary points
+        rho_avg = fluid_sg * 62.4  # lb/ft3 (mixed fluid density)
+        hydrostatic_gradient = rho_avg / 144  # psi/ft
+        
+        if pump_depth_ft < pwf_measurement_depth_ft:
+            # Pump is above measurement point - pressure decreases going upward
+            pump_intake_pressure_psi = pwf_psi - hydrostatic_gradient * depth_diff
+            console.print(f"Pump above measurement depth: reducing pressure by hydrostatic head")
+        else:
+            # Pump is below measurement point - pressure increases going downward
+            pump_intake_pressure_psi = pwf_psi + hydrostatic_gradient * depth_diff
+            console.print(f"Pump below measurement depth: increasing pressure by hydrostatic head")
+            
+        console.print(f"Hydrostatic gradient (mixed fluid): [bright_red]{hydrostatic_gradient:.3f}[/bright_red] psi/ft")
+        console.print(f"Depth difference: [bright_red]{depth_diff:.0f}[/bright_red] ft")
+        console.print(f"Pressure adjustment: [bright_red]{hydrostatic_gradient * depth_diff:+.0f}[/bright_red] psi")
+        
+        # Optional: Try two-phase flow for comparison (but don't use for ESP calculation)
+        try:
+            # Calculate representative two-phase gradient for reference
+            depths_to_measurement, pressures_to_measurement = two_phase_flow(
+                diameter_in=tubing_ID_in,
+                total_length_ft=min(pwf_measurement_depth_ft, 3000),  # Limit calculation length
+                gas_liquid_ratio_scf_stb=GLR_scf_stb,
+                water_oil_ratio_stb_stb=WOR,
+                oil_gravity_api=oil_API,
+                gas_gravity=gas_gravity,
+                water_gravity=water_gravity,
+                separator_temperature_f=separator_temperature_f,
+                separator_pressure_psi=separator_pressure_psi,
+                oil_flowrate_stb_d=oil_rate_bpd,
+                surface_temperature_f=surface_temperature_f,
+                bottom_temperature_f=BHT_f,
+                wellhead_pressure_psi=separator_pressure_psi,
+                return_detailed_properties=False
+            )
+            
+            if len(depths_to_measurement) > 1:
+                # Calculate overall gradient for reference
+                two_phase_gradient = (pressures_to_measurement[-1] - pressures_to_measurement[0]) / \
+                                   (depths_to_measurement[-1] - depths_to_measurement[0])
+                console.print(f"Two-phase flow gradient (reference): [bright_cyan]{two_phase_gradient:.3f}[/bright_cyan] psi/ft")
+                console.print(f"Gradient difference: [bright_cyan]{((two_phase_gradient/hydrostatic_gradient - 1)*100):+.1f}%[/bright_cyan] vs hydrostatic")
+                
+        except Exception as e:
+            console.print(f"[yellow]Note: Two-phase flow reference calculation failed ({e})[/yellow]")
+        
+        console.print(f"Measured Pwf at {pwf_measurement_depth_ft:.0f} ft: [bright_red]{pwf_psi:.0f}[/bright_red] psia")
+        console.print(f"Translated pressure at pump depth ({pump_depth_ft:.0f} ft): [bright_red]{pump_intake_pressure_psi:.0f}[/bright_red] psia")
+        console.print(f"Pressure difference: [bright_red]{pump_intake_pressure_psi - pwf_psi:+.0f}[/bright_red] psi")
+    
+    # Display calculated information
+    console.print(f"\nWell Data:")
+    console.print(f"  Pump Depth: [bright_red]{pump_depth_ft:,.0f}[/bright_red] ft TVD")
+    console.print(f"  Pump Intake Pressure: [bright_red]{pump_intake_pressure_psi:.0f}[/bright_red] psia" + 
+                  (f" (translated from {pwf_psi:.0f} psia at {pwf_measurement_depth_ft:.0f} ft)" if pwf_measurement_depth_ft is not None and abs(pwf_measurement_depth_ft - pump_depth_ft) > 1 else ""))
+    console.print(f"  Bottomhole Temperature: [bright_red]{BHT_f:.0f}[/bright_red] °F")
+    console.print(f"  Tubing ID: [bright_red]{tubing_ID_in:.3f}[/bright_red] inches")
+    
+    # Pump Specifications
+    console.print(f"Pump Specifications:")
+    console.print(f"  Head per Stage: [bright_red]{head_per_stage_ft:.1f}[/bright_red] ft/stage")
+    console.print(f"  HP per Stage: [bright_red]{hp_per_stage:.1f}[/bright_red] hp/stage")
+    
+    console.print(f"Water-Oil Ratio (WOR): [bright_red]{WOR:.2f}[/bright_red]")
+    console.print(f"[bright_cyan]WOR[/bright_cyan] = water_cut / (1 - water_cut)")
+    
+    # Step 2: Calculate fluid properties at pump conditions
+    console.print(f"\n[bold bright_cyan]STEP 2: Fluid Properties at Pump Intake[/bold bright_cyan]")
+    
+    # Calculate oil specific gravity and mixed fluid properties
+    oil_sg = 141.5 / (131.5 + oil_API)
+    fluid_sg = oil_sg * (1 - water_cut_fraction) + water_gravity * water_cut_fraction
+    
+    console.print(f"Oil Specific Gravity: [bright_red]{oil_sg:.3f}[/bright_red]")
+    console.print(f"Mixed Fluid Specific Gravity: [bright_red]{fluid_sg:.3f}[/bright_red]")
+    console.print(f"[bright_cyan]fluid_sg[/bright_cyan] = oil_sg × (1 - water_cut) + water_sg × water_cut")
+    
+    # Step 3: Calculate discharge pressure (Determine required output)
+    console.print(f"\n[bold bright_cyan]STEP 3: Calculate Discharge Pressure (Required Output)[/bold bright_cyan]")
+    
+    # ESP discharge pressure is the pressure needed at pump discharge to lift fluid to surface
+    # This should be calculated by determining the pressure drop from pump to surface and adding wellhead pressure
+    
+    try:
+        # Calculate pressure profile from surface to pump depth to get pressure drop
+        depths, pressures = two_phase_flow(
+            diameter_in=tubing_ID_in,
+            total_length_ft=pump_depth_ft,
+            gas_liquid_ratio_scf_stb=GLR_scf_stb,
+            water_oil_ratio_stb_stb=WOR,
+            oil_gravity_api=oil_API,
+            gas_gravity=gas_gravity,
+            water_gravity=water_gravity,
+            separator_temperature_f=separator_temperature_f,
+            separator_pressure_psi=separator_pressure_psi,
+            oil_flowrate_stb_d=oil_rate_bpd,
+            surface_temperature_f=surface_temperature_f,
+            bottom_temperature_f=BHT_f,
+            wellhead_pressure_psi=wellhead_pressure_psi,
+            length_increment_ft=500
+        )
+        
+        # The pressure drop from surface to pump depth
+        pressure_drop_surface_to_pump = pressures[-1] - pressures[0]
+        # ESP discharge pressure = wellhead pressure + pressure needed to overcome this drop
+        discharge_pressure = wellhead_pressure_psi + pressure_drop_surface_to_pump
+        
+        console.print(f"Pressure drop from surface to pump: [bright_red]{pressure_drop_surface_to_pump:.0f}[/bright_red] psi")
+        console.print(f"Required Discharge Pressure: [bright_red]{discharge_pressure:.0f}[/bright_red] psia")
+        console.print(f"  = Wellhead Pressure ({wellhead_pressure_psi:.0f}) + Pressure Drop ({pressure_drop_surface_to_pump:.0f})")
+        
+    except Exception as e:
+        console.print(f"[yellow]Warning: Two-phase flow calculation failed: {str(e)}[/yellow]")
+        console.print("[yellow]Using simplified hydrostatic calculation[/yellow]")
+        
+        # Hydrostatic pressure drop from surface to pump depth
+        pressure_drop_hydrostatic = fluid_sg * 0.433 * pump_depth_ft  # psi
+        discharge_pressure = wellhead_pressure_psi + pressure_drop_hydrostatic
+        
+        console.print(f"Hydrostatic pressure drop: [bright_red]{pressure_drop_hydrostatic:.0f}[/bright_red] psi")
+        console.print(f"Required Discharge Pressure: [bright_red]{discharge_pressure:.0f}[/bright_red] psia")
+    
+    # Step 4: Calculate deltaP (discharge - Pwf)
+    console.print(f"\n[bold bright_cyan]STEP 4: Calculate Pressure Requirements[/bold bright_cyan]")
+    
+    deltaP = discharge_pressure - pump_intake_pressure_psi
+    console.print(f"Total Pressure Rise Required (ΔP): [bright_red]{deltaP:.0f}[/bright_red] psi")
+    console.print(f"  ΔP = {discharge_pressure:.0f} - {pump_intake_pressure_psi:.0f} = [bright_red]{deltaP:.0f}[/bright_red] psi")
+    
+    # Step 5: Calculate pressure per stage, efficiency, and number of stages
+    console.print(f"\n[bold bright_cyan]STEP 5: Calculate Stages Required[/bold bright_cyan]")
+    
+    delta_ps = head_per_stage_ft * fluid_sg * 0.433
+    console.print(f"Pressure per Stage: [bright_red]{delta_ps:.2f}[/bright_red] psi/stage (= {head_per_stage_ft:.1f} × {fluid_sg:.3f} × 0.433)")
+    
+    # Calculate ESP efficiency using the standard equation: efficiency = 1.7e-5 * Q * ΔPs / hp_per_stage
+    pump_efficiency_calculated = 1.7e-5 * liquid_rate_bpd * delta_ps / hp_per_stage
+    pump_efficiency_percent = pump_efficiency_calculated * 100  # Convert to percentage
+    console.print(f"Calculated Pump Efficiency: [bright_red]{pump_efficiency_percent:.1f}[/bright_red]%")
+    console.print(f"[bright_cyan]efficiency[/bright_cyan] = 1.7e-5 × {liquid_rate_bpd:.0f} × {delta_ps:.2f} ÷ {hp_per_stage:.1f} = {pump_efficiency_calculated:.4f}")
+    
+    # Efficiency validation and warnings
+    if pump_efficiency_percent < 60:
+        console.print("[yellow]Warning: Low efficiency (<60%) - Consider different pump specifications or operating conditions[/yellow]")
+    elif pump_efficiency_percent > 90:
+        console.print("[yellow]Note: High efficiency (>90%) - Verify pump specifications and operating conditions[/yellow]")
+    
+    stages_required = deltaP / delta_ps
+    stages_design = int(np.ceil(stages_required * (1 + design_margin_percent/100)))
+    
+    console.print(f"Stages Required: [bright_red]{stages_required:.1f}[/bright_red] (= {deltaP:.0f} ÷ {delta_ps:.2f})")
+    console.print(f"Design Stages (with {design_margin_percent}% margin): [bright_red]{stages_design}[/bright_red]")
+    
+    if stages_design > max_stages:
+        console.print(f"[red]ERROR: Required stages ({stages_design}) exceed maximum ({max_stages})[/red]")
+    
+    # Step 6: Calculate required horsepower
+    console.print(f"\n[bold bright_cyan]STEP 6: Calculate Power Requirements[/bold bright_cyan]")
+    
+    total_bhp = stages_design * hp_per_stage
+    
+    console.print(f"Total Brake Horsepower: [bright_red]{total_bhp:.1f}[/bright_red] hp (= {stages_design} × {hp_per_stage:.1f})")
+    
+    # Design Summary
+    console.print(f"\n[bold bright_green]FINAL ESP DESIGN SUMMARY:[/bold bright_green]")
+    console.print(f"Pump Type: Custom Specification")
+    console.print(f"Number of Stages: [bright_red]{stages_design}[/bright_red]")
+    console.print(f"Total Horsepower: [bright_red]{total_bhp:.1f}[/bright_red] hp")
+    console.print(f"Operating Efficiency: [bright_red]{pump_efficiency_percent:.1f}[/bright_red]%")
+    console.print(f"Total Head: [bright_red]{stages_design * head_per_stage_ft:.0f}[/bright_red] ft")
+    console.print(f"Total Pressure Rise: [bright_red]{stages_design * delta_ps:.0f}[/bright_red] psi")
+    
+    # Return results dictionary
+    results = {
+        'design_summary': {
+            'liquid_rate_bpd': liquid_rate_bpd,
+            'pump_model': 'Custom Specification',
+            'stages': stages_design,
+            'total_hp': total_bhp,
+            'efficiency_percent': pump_efficiency_percent
+        },
+        'fluid_properties': {
+            'fluid_sg': fluid_sg,
+            'oil_sg': oil_sg,
+            'WOR': WOR,
+            'water_cut': water_cut_fraction
+        },
+        'pressure_analysis': {
+            'pwf_measured_psi': pwf_psi,
+            'pwf_measurement_depth_ft': pwf_measurement_depth_ft,
+            'pump_intake_pressure_psi': pump_intake_pressure_psi,
+            'discharge_pressure_psi': discharge_pressure,
+            'differential_pressure_psi': deltaP,
+            'delta_ps_per_stage': delta_ps
+        },
+        'pump_performance': {
+            'flow_rate_bpd': liquid_rate_bpd,
+            'head_per_stage_ft': head_per_stage_ft,
+            'hp_per_stage': hp_per_stage,
+            'efficiency_percent': pump_efficiency_percent,
+            'stages_theoretical': stages_required,
+            'stages_design': stages_design
+        },
+        'power_requirements': {
+            'total_bhp': total_bhp
+        }
+    }
+    
+    return results

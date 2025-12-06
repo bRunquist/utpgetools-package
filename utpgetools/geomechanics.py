@@ -883,3 +883,83 @@ def calculate_mud_weights(Pp,
 	if well_depth is None:
 		print("Well depth not provided; mud weights in ppg not calculated.")
 	return pressures, mudweights
+def create_stress_log(depth, density, sv, dt_shear, dt_comp, e_static_prime, 
+                      shmin, shmax, title='Stress Log - Lost Hills Well', figsize=(15, 10)):
+    """
+    Create a comprehensive stress log with 5 tracks showing various geomechanical properties.
+    
+    Parameters:
+    depth (array-like): Depth values (ft)
+    density (array-like): Bulk density values (g/cc)
+    sv (array-like): Vertical stress values (psi)
+    dt_shear (array-like): Shear wave travel time (μs/ft)
+    dt_comp (array-like): Compressional wave travel time (μs/ft)
+    e_static_prime (array-like): Static Young's modulus E' values (psi)
+    shmin (array-like): Minimum horizontal stress values (psi)
+    shmax (array-like): Maximum horizontal stress values (psi)
+    title (str): Title for the plot
+    figsize (tuple): Figure size as (width, height)
+    
+    Returns:
+    tuple: (fig, axes) matplotlib figure and axes objects
+    """
+    # Create stress log with 5 tracks
+    fig, axes = plt.subplots(1, 5, figsize=figsize, sharey=True)
+    fig.suptitle(title, fontsize=16, fontweight='bold')
+
+    # Track 1: Bulk Density
+    axes[0].plot(density, depth, 'k-', linewidth=2)
+    axes[0].set_xlabel('Bulk Density\n(g/cc)')
+    axes[0].xaxis.set_label_position('top')
+    axes[0].tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+    axes[0].grid(True, alpha=0.3)
+    axes[0].invert_yaxis()
+    axes[0].set_ylabel('Depth (ft)')
+
+    # Track 2: Sv (Vertical Stress)
+    axes[1].plot(sv, depth, 'r-', linewidth=2)
+    axes[1].set_xlabel('Sv\n(psi)')
+    axes[1].xaxis.set_label_position('top')
+    axes[1].tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+    axes[1].grid(True, alpha=0.3)
+
+    # Track 3: Wave Travel Time
+    axes[2].plot(dt_shear, depth, 'b-', linewidth=2, label='S-wave')
+    axes[2].plot(dt_comp, depth, 'r-', linewidth=2, label='P-wave')
+    axes[2].set_xlabel('Travel Time\n(μs/ft)')
+    axes[2].xaxis.set_label_position('top')
+    axes[2].tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend()
+
+    # Track 4: E' static
+    axes[3].plot(e_static_prime, depth, 'r-', linewidth=2)
+    axes[3].set_xlabel("E' static\n(psi)")
+    axes[3].xaxis.set_label_position('top')
+    axes[3].tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+    axes[3].grid(True, alpha=0.3)
+
+    # Track 5: Stress Components
+    axes[4].plot(shmin, depth, 'b-', linewidth=2, label='Shmin')
+    axes[4].plot(shmax, depth, 'g-', linewidth=2, label='SHmax')
+    axes[4].plot(sv, depth, 'r-', linewidth=2, label='Sv')
+    axes[4].set_xlabel('Stress\n(psi)')
+    axes[4].xaxis.set_label_position('top')
+    axes[4].tick_params(top=True, bottom=False, labeltop=True, labelbottom=False)
+    axes[4].grid(True, alpha=0.3)
+    axes[4].legend()
+
+    # Set y-axis limits and add minor gridlines for all tracks
+    depth_min = min(depth)
+    depth_max = max(depth)
+
+    for ax in axes:
+        ax.set_ylim(depth_max, depth_min)  # Inverted because depth increases downward
+        ax.grid(True, alpha=0.3, which='major')
+        ax.grid(True, alpha=0.15, which='minor')
+        ax.minorticks_on()
+
+    # Adjust layout
+    plt.tight_layout()
+    
+    return fig, axes
