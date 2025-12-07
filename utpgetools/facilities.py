@@ -951,3 +951,725 @@ def standing_katz(gamma_g, pressure, temperature_f, component=None, co2_percent=
         'k': k,
         'iterations': iteration + 1
     }
+
+
+def gas_properties(temperature_f, pressure_psi, composition_fractions, z_factor):
+    """
+    Calculate gas density and viscosity for natural gas mixtures.
+    
+    This function calculates both gas density and viscosity using industry-standard
+    correlations. Gas density is calculated using the real gas equation of state
+    with z-factor correction, while viscosity is determined using the Lee-Gonzalez-Eakin
+    correlation which is widely accepted in petroleum engineering applications.
+    
+    References:
+        - Lee, A.L., Gonzalez, M.H., and Eakin, B.E.: "The Viscosity of Natural Gases," 
+          JPT (August 1966) 997-1000; Trans., AIME, 237.
+        - McCain, W.D.: "The Properties of Petroleum Fluids" 2nd Ed. (1990), Ch. 7
+        - Ahmed, T.: "Reservoir Engineering Handbook" 5th Ed. (2019), Ch. 1
+        - Whitson & Brule: "Phase Behavior" (2000), Ch. 3
+    
+    Args:
+        temperature_f (float): Temperature in °F
+        pressure_psi (float): Pressure in psia
+        composition_fractions (list): Mole fractions for components in order:
+            [N2, CO2, H2S, C1, C2, C3, iC4, nC4, iC5, nC5, C6, C7+]
+        z_factor (float): Gas compressibility factor (from PVT correlations)
+        
+    Returns:
+        dict: Dictionary containing gas properties:
+            - 'density_lb_ft3': Gas density in lb/ft³
+            - 'viscosity_cp': Gas viscosity in cp
+            - 'molecular_weight': Apparent molecular weight in g/mol
+            - 'specific_gravity': Gas specific gravity (air = 1.0)
+            
+    Examples:
+        >>> composition = [0.01, 0.05, 0.0, 0.85, 0.07, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        >>> z = 0.85
+        >>> props = gas_properties(80, 1000, composition, z)
+        >>> print(f"Density: {props['density_lb_ft3']:.3f} lb/ft³")
+        >>> print(f"Viscosity: {props['viscosity_cp']:.6f} cp")
+        
+    Notes:
+        - The Lee-Gonzalez-Eakin correlation is valid for natural gas mixtures
+          with specific gravities from 0.55 to 1.5 and temperatures from 100-340°F
+        - Gas density calculation uses the real gas equation: ρ = PM/(zRT)
+        - Component molecular weights are standard values from petroleum engineering literature
+        - Function includes detailed console output for debugging and verification
+    """
+    import math
+    
+    # Convert temperature to Rankine
+    T_R = temperature_f + 459.67  # °R
+    
+    # Component molecular weights (well-established values from NIST/API databases)
+    molecular_weights = {
+        'N2': 28.014, 'CO2': 44.010, 'H2S': 34.082, 'C1': 16.043,
+        'C2': 30.070, 'C3': 44.097, 'iC4': 58.124, 'nC4': 58.124,
+        'iC5': 72.151, 'nC5': 72.151, 'C6': 86.178, 'C7+': 100.20
+    }
+    
+    components = ['N2', 'CO2', 'H2S', 'C1', 'C2', 'C3', 'iC4', 'nC4', 'iC5', 'nC5', 'C6', 'C7+']
+    
+    # Calculate apparent molecular weight of gas mixture
+    Ma = sum(xi * molecular_weights[comp] for xi, comp in zip(composition_fractions, components))
+    
+    # Calculate specific gravity of gas (relative to air, MW = 28.97)
+    gamma_g = Ma / 28.97
+    
+    # Calculate gas density using real gas equation of state
+    # ρ = PM/(zRT) where R = 10.73 psia·ft³/(lb-mol·°R)
+    rho_g = pressure_psi * Ma / (10.73 * T_R * z_factor)  # lb/ft³
+    
+    # Lee-Gonzalez-Eakin correlation for viscosity
+    # Select correlation constants based on gas specific gravity
+    if gamma_g <= 0.681:
+        # Light gas mixture correlation constants
+        A = (9.379 + 0.01607 * Ma) * T_R**1.5 / (209.2 + 19.26 * Ma + T_R)
+        B = 3.448 + (986.4 / T_R) + 0.01009 * Ma
+        C = 2.447 - 0.2224 * B
+    else:
+        # Heavier gas mixture correlation constants
+        A = (8.188 - 0.6579 * gamma_g) * T_R**1.5 / (107.2 + 519.4 * gamma_g + T_R)
+        B = 3.49 + (1.672 / gamma_g**2) * (1944.0 / T_R)
+        C = 1.2 + 0.00245 * (T_R - 459.67)
+    
+    # Calculate viscosity in micropoises, then convert to centipoise
+    mu_micropoise = A * math.exp(B * (rho_g / 62.4)**C)
+    mu_cp = mu_micropoise / 10000  # Convert μP to cp
+    
+    # Print detailed calculation results for verification
+    print(f"Gas Properties Calculation Results:")
+    print(f"  Temperature: {temperature_f:.1f} °F ({T_R:.1f} °R)")
+    print(f"  Pressure: {pressure_psi:.1f} psia")
+    print(f"  Z-factor: {z_factor:.4f}")
+    print(f"  Molecular weight: {Ma:.2f} g/mol")
+    print(f"  Specific gravity: {gamma_g:.4f}")
+    print(f"  Density: {rho_g:.3f} lb/ft³")
+    print(f"  Lee-Gonzalez-Eakin coefficients:")
+    print(f"    A = {A:.6f}")
+    print(f"    B = {B:.4f}") 
+    print(f"    C = {C:.4f}")
+    print(f"  Viscosity: {mu_cp:.6f} cp")
+    
+    return {
+        'density_lb_ft3': rho_g,
+        'viscosity_cp': mu_cp,
+        'molecular_weight': Ma,
+        'specific_gravity': gamma_g
+    }
+
+
+def hall_yarborough_z_factor(reduced_pressure, reduced_temperature, tolerance=1e-6, max_iterations=100):
+    """
+    Calculate gas compressibility factor using the Hall-Yarborough correlation.
+    
+    The Hall-Yarborough correlation is one of the most accurate methods for calculating
+    gas compressibility factors for natural gases. It's based on the Starling-Carnahan-
+    Desantis equation of state and is particularly accurate at high pressures and 
+    temperatures typical in natural gas applications.
+    
+    References:
+        - Hall, K.R. and Yarborough, L.: "A New Equation of State for Z-factor Calculations,"
+          Oil & Gas Journal, June 18, 1973, pp. 82-92
+        - McCain, W.D.: "The Properties of Petroleum Fluids" 2nd Ed. (1990), Ch. 3
+        - Ahmed, T.: "Reservoir Engineering Handbook" 5th Ed. (2019), Ch. 1
+        - Standing, M.B.: "Volumetric and Phase Behavior of Oil Field Hydrocarbon Systems" (1977)
+    
+    Args:
+        reduced_pressure (float): Reduced pressure (P/Pc), dimensionless
+        reduced_temperature (float): Reduced temperature (T/Tc), dimensionless  
+        tolerance (float, optional): Convergence tolerance for iteration. Default 1e-6
+        max_iterations (int, optional): Maximum number of iterations. Default 100
+        
+    Returns:
+        dict: Dictionary containing calculation results:
+            - 'z_factor': Gas compressibility factor
+            - 'reduced_density': Reduced density (ρr)
+            - 'iterations': Number of iterations required for convergence
+            - 'converged': Boolean indicating if solution converged
+            
+    Raises:
+        ValueError: If reduced pressure or temperature are outside valid ranges
+        RuntimeError: If iteration fails to converge within max_iterations
+        
+    Examples:
+        >>> # Calculate z-factor for natural gas at 2000 psia, 150°F
+        >>> # Assuming Pc = 667 psia, Tc = 380°R (typical natural gas)
+        >>> Pr = 2000 / 667  # ≈ 3.0
+        >>> Tr = (150 + 459.67) / 380  # ≈ 1.6
+        >>> result = hall_yarborough_z_factor(Pr, Tr)
+        >>> print(f"Z-factor: {result['z_factor']:.4f}")
+        
+        >>> # High pressure gas
+        >>> result = hall_yarborough_z_factor(8.0, 1.5)
+        >>> if result['converged']:
+        >>>     print(f"Z = {result['z_factor']:.4f} in {result['iterations']} iterations")
+        
+    Notes:
+        - Valid range: 0.2 ≤ Pr ≤ 30, 1.0 ≤ Tr ≤ 3.0
+        - Accuracy: ±0.5% for most natural gas compositions
+        - Uses Newton-Raphson iteration to solve implicit equation
+        - More accurate than Dranchuk-Abu-Kassem at very high pressures
+        - Particularly suitable for gas injection and high-pressure reservoir applications
+    """
+    import math
+    
+    # Validate input ranges
+    if reduced_pressure < 0.2 or reduced_pressure > 30:
+        raise ValueError(f"Reduced pressure {reduced_pressure:.3f} outside valid range [0.2, 30]")
+    if reduced_temperature < 1.0 or reduced_temperature > 3.0:
+        raise ValueError(f"Reduced temperature {reduced_temperature:.3f} outside valid range [1.0, 3.0]")
+    
+    Pr = reduced_pressure
+    Tr = reduced_temperature
+    
+    # Hall-Yarborough correlation constants
+    t = 1.0 / Tr
+    
+    # Correlation coefficients
+    A = 0.06125 * t * math.exp(-1.2 * (1 - t)**2)
+    B = t * (14.76 - 9.76 * t + 4.58 * t**2)
+    C = t * (90.7 - 242.2 * t + 42.4 * t**2)
+    D = 2.18 + 2.82 * t
+    
+    # Initial guess for reduced density using ideal gas approximation
+    y = 0.001  # Start with low density guess
+    
+    iteration = 0
+    converged = False
+    
+    print(f"Hall-Yarborough Z-factor Calculation:")
+    print(f"  Pr = {Pr:.4f}, Tr = {Tr:.4f}")
+    print(f"  Coefficients: A={A:.6f}, B={B:.4f}, C={C:.4f}, D={D:.4f}")
+    
+    while iteration < max_iterations:
+        # Calculate function F(y) and its derivative F'(y)
+        # F(y) = -A*Pr + (y + y^2 + y^3 - y^4)/(1-y)^3 - B*y^2 - C*y^D
+        
+        if y >= 1.0:
+            # Prevent division by zero and ensure physical solution
+            y = 0.99
+        
+        denominator = (1 - y)**3
+        if abs(denominator) < 1e-15:
+            y = 0.99
+            denominator = (1 - y)**3
+            
+        # Function value
+        F = (-A * Pr + 
+             (y + y**2 + y**3 - y**4) / denominator - 
+             B * y**2 - 
+             C * y**D)
+        
+        # Derivative calculation
+        numerator_deriv = (1 + 2*y + 3*y**2 - 4*y**3) * (1-y)**3 + 3*(1-y)**2 * (y + y**2 + y**3 - y**4)
+        dF_dy = (numerator_deriv / ((1-y)**6) - 
+                 2 * B * y - 
+                 C * D * y**(D-1))
+        
+        # Newton-Raphson update
+        if abs(dF_dy) < 1e-15:
+            raise RuntimeError("Derivative became zero - cannot continue iteration")
+            
+        y_new = y - F / dF_dy
+        
+        # Ensure physical bounds
+        y_new = max(0.001, min(0.99, y_new))
+        
+        # Check convergence
+        if abs(y_new - y) < tolerance:
+            converged = True
+            y = y_new
+            break
+            
+        y = y_new
+        iteration += 1
+        
+        if iteration <= 5 or iteration % 10 == 0:
+            print(f"  Iteration {iteration}: y = {y:.6f}, F = {F:.8f}")
+    
+    if not converged:
+        raise RuntimeError(f"Hall-Yarborough iteration failed to converge after {max_iterations} iterations")
+    
+    # Calculate final z-factor
+    z_factor = A * Pr / y
+    
+    print(f"  Converged in {iteration} iterations")
+    print(f"  Final reduced density: {y:.6f}")
+    print(f"  Z-factor: {z_factor:.6f}")
+    
+    return {
+        'z_factor': z_factor,
+        'reduced_density': y,
+        'iterations': iteration,
+        'converged': converged
+    }
+
+
+def hall_yarborough(gamma_g, pressure, temperature, composition_fractions, 
+                    co2_percent=0.0, h2s_percent=0.0, deltacp=None):
+    """
+    Calculate gas compressibility factor using Hall-Yarborough correlation with component-by-component method.
+    
+    This function uses the same interface and methodology as the standing_katz function but implements
+    the Hall-Yarborough correlation instead of Dranchuk-Abou-Kassem. It includes component-by-component
+    critical property calculations and Wichert-Aziz corrections for acid gas components.
+    
+    References:
+        - Hall, K.R. and Yarborough, L.: "A New Equation of State for Z-factor Calculations,"
+          Oil & Gas Journal, June 18, 1973, pp. 82-92
+        - Wichert, E. and Aziz, K.: "Calculate Z's for Sour Gases," Hydrocarbon Processing (1972)
+        - Standing, M.B.: "A Pressure-Volume-Temperature Correlation for Mixtures of California Oils and Gases" (1947)
+    
+    Args:
+        gamma_g (float): Gas specific gravity (relative to air = 1.0)
+        pressure (float): Pressure in psia
+        temperature (float): Temperature in °F
+        composition_fractions (list): Component mole fractions in order:
+            [N2, CO2, H2S, C1, C2, C3, iC4, nC4, iC5, nC5, C6, C7+]
+        co2_percent (float, optional): CO2 mole percentage for acid gas correction. Default 0.0
+        h2s_percent (float, optional): H2S mole percentage for acid gas correction. Default 0.0  
+        deltacp (float, optional): Correction factor for cp calculations. If None, function will
+            print reduced properties and request deltacp input.
+            
+    Returns:
+        dict: Dictionary containing calculation results:
+            - 'z_factor': Gas compressibility factor
+            - 'Tpc': Pseudo-critical temperature in °R
+            - 'Ppc': Pseudo-critical pressure in psia
+            - 'Tr': Reduced temperature
+            - 'Pr': Reduced pressure
+            - 'deltacp': Applied deltacp correction factor
+            - 'cp': Heat capacity at constant pressure in Btu/(lb·mol·°R)
+            - 'cv': Heat capacity at constant volume in Btu/(lb·mol·°R)
+            - 'k': Isentropic exponent (cp/cv)
+            - 'iterations': Number of iterations required
+            - 'converged': Boolean indicating convergence success
+            
+    Raises:
+        ValueError: If deltacp is not provided (prints Tr, Pr for user reference)
+        RuntimeError: If Hall-Yarborough iteration fails to converge
+        
+    Examples:
+        >>> # Natural gas composition (mole fractions)
+        >>> comp = [0.01, 0.05, 0.0, 0.85, 0.07, 0.02, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        >>> result = hall_yarborough(0.65, 2000, 150, comp, deltacp=0.6)
+        >>> print(f"Z-factor: {result['z_factor']:.4f}")
+        
+        >>> # High pressure sour gas
+        >>> comp = [0.005, 0.15, 0.05, 0.75, 0.045, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  
+        >>> result = hall_yarborough(0.75, 5000, 200, comp, co2_percent=15, h2s_percent=5, deltacp=0.8)
+        
+    Notes:
+        - Uses component-by-component critical properties for enhanced accuracy
+        - Includes Wichert-Aziz correction for CO2 and H2S content
+        - More accurate than Dranchuk-Abou-Kassem at very high pressures (Pr > 15)
+        - Maintains same interface as standing_katz for easy substitution
+    """
+    import math
+    
+    # Convert temperature to Rankine
+    temperature_R = temperature + 459.67
+    
+    # Component critical properties: [Tc(°R), Pc(psia), MW(lb/lbmol)]
+    critical_properties = {
+        'N2':   [227.16, 493.1, 28.014],   'CO2':  [547.56, 1071.0, 44.010],
+        'H2S':  [672.35, 1300.0, 34.082],  'C1':   [343.33, 667.8, 16.043],
+        'C2':   [549.78, 707.8, 30.070],   'C3':   [665.73, 616.3, 44.097],
+        'iC4':  [734.98, 529.1, 58.124],   'nC4':  [765.29, 550.7, 58.124],
+        'iC5':  [828.77, 490.4, 72.151],   'nC5':  [845.47, 488.6, 72.151],
+        'C6':   [913.27, 436.9, 86.178],   'C7+':  [972.0, 396.0, 100.20]
+    }
+    
+    components = ['N2', 'CO2', 'H2S', 'C1', 'C2', 'C3', 'iC4', 'nC4', 'iC5', 'nC5', 'C6', 'C7+']
+    
+    # Calculate pseudo-critical properties using component-by-component method
+    if len(composition_fractions) == len(components):
+        # Use detailed component composition
+        Tpc = sum(xi * critical_properties[comp][0] for xi, comp in zip(composition_fractions, components))
+        Ppc = sum(xi * critical_properties[comp][1] for xi, comp in zip(composition_fractions, components))
+        
+        print(f"Component-by-component pseudo-critical properties:")
+        print(f"  Tpc = {Tpc:.2f} °R, Ppc = {Ppc:.1f} psia")
+        
+        # Extract acid gas fractions from composition if not provided
+        if co2_percent == 0.0 and composition_fractions[1] > 0:
+            co2_percent = composition_fractions[1] * 100
+        if h2s_percent == 0.0 and composition_fractions[2] > 0:
+            h2s_percent = composition_fractions[2] * 100
+            
+        co2 = co2_percent / 100
+        h2s = h2s_percent / 100
+    else:
+        # Fallback to gas specific gravity correlations
+        Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2
+        Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2
+        co2 = co2_percent / 100
+        h2s = h2s_percent / 100
+    
+    # Apply Wichert-Aziz correction for sour gas components
+    if (co2 + h2s) > 0.001:  # Apply correction if significant acid gas content
+        correction_factor = 120 * ((co2 + h2s)**0.9 + (co2 + h2s)**1.6) + (h2s**0.5 + h2s**4)
+        Tpc_corr = Tpc - correction_factor
+        Ppc_corr = (Ppc * Tpc_corr) / (Tpc + h2s * (1-h2s) * correction_factor)
+        Tpc = Tpc_corr
+        Ppc = Ppc_corr
+        print(f"Applied Wichert-Aziz correction for {co2_percent:.1f}% CO2, {h2s_percent:.1f}% H2S")
+        print(f"  Corrected Tpc = {Tpc:.2f} °R, Ppc = {Ppc:.1f} psia")
+    
+    # Calculate pseudo-reduced properties
+    Tr = temperature_R / Tpc
+    Pr = pressure / Ppc
+    
+    # Handle deltacp input
+    if deltacp is None:
+        # Print reduced properties for deltacp determination and raise error
+        print(f"Corrected Tr: {Tr:.3f}, Corrected Pr: {Pr:.3f}")
+        raise ValueError("deltacp is required. Please determine deltacp from the reduced properties chart and re-run with deltacp parameter.")
+    
+    # ===== HALL-YARBOROUGH CALCULATION =====
+    print(f"Hall-Yarborough Z-factor Calculation:")
+    print(f"  Pr = {Pr:.4f}, Tr = {Tr:.4f}")
+    
+    # Hall-Yarborough correlation constants
+    t = 1.0 / Tr
+    
+    # Correlation coefficients  
+    A = 0.06125 * t * math.exp(-1.2 * (1 - t)**2)
+    B = t * (14.76 - 9.76 * t + 4.58 * t**2)
+    C = t * (90.7 - 242.2 * t + 42.4 * t**2)
+    D = 2.18 + 2.82 * t
+    
+    print(f"  Coefficients: A={A:.6f}, B={B:.4f}, C={C:.4f}, D={D:.4f}")
+    
+    # Initial guess for reduced density
+    y = 0.001  # Start with low density guess
+    
+    max_iterations = 100
+    tolerance = 1e-6
+    iteration = 0
+    converged = False
+    
+    while iteration < max_iterations:
+        # Hall-Yarborough equation: F(y) = -A*Pr + (y + y^2 + y^3 - y^4)/(1-y)^3 - B*y^2 - C*y^D
+        
+        if y >= 1.0:
+            y = 0.99  # Prevent division by zero
+        
+        denominator = (1 - y)**3
+        if abs(denominator) < 1e-15:
+            y = 0.99
+            denominator = (1 - y)**3
+            
+        # Function value
+        F = (-A * Pr + 
+             (y + y**2 + y**3 - y**4) / denominator - 
+             B * y**2 - 
+             C * y**D)
+        
+        # Derivative calculation for Newton-Raphson
+        numerator_deriv = (1 + 2*y + 3*y**2 - 4*y**3) * (1-y)**3 + 3*(1-y)**2 * (y + y**2 + y**3 - y**4)
+        dF_dy = (numerator_deriv / ((1-y)**6) - 
+                 2 * B * y - 
+                 C * D * y**(D-1))
+        
+        # Newton-Raphson update
+        if abs(dF_dy) < 1e-15:
+            raise RuntimeError("Hall-Yarborough derivative became zero - cannot continue iteration")
+            
+        y_new = y - F / dF_dy
+        
+        # Ensure physical bounds
+        y_new = max(0.001, min(0.99, y_new))
+        
+        # Check convergence
+        if abs(y_new - y) < tolerance:
+            converged = True
+            y = y_new
+            break
+            
+        y = y_new
+        iteration += 1
+        
+        if iteration <= 5 or iteration % 10 == 0:
+            print(f"  Iteration {iteration}: y = {y:.6f}, F = {F:.8f}")
+    
+    if not converged:
+        raise RuntimeError(f"Hall-Yarborough iteration failed to converge after {max_iterations} iterations")
+    
+    # Calculate final z-factor
+    Z1 = A * Pr / y
+    
+    print(f"  Converged in {iteration} iterations")
+    print(f"  Final reduced density: {y:.6f}")
+    print(f"  Z-factor: {Z1:.6f}")
+    
+    # Calculate heat capacity properties (same as standing_katz)
+    cp = 0.25 * (28 + 0.0054 * temperature) + deltacp
+    cv = cp - 1.987  # Universal gas constant in Btu/(lb·mol·°R)
+    k = cp / cv  # Isentropic exponent
+    
+    return {
+        'z_factor': Z1,
+        'Tpc': Tpc,
+        'Ppc': Ppc,
+        'Tr': Tr,
+        'Pr': Pr,
+        'deltacp': deltacp,
+        'cp': cp,
+        'cv': cv,
+        'k': k,
+        'iterations': iteration + 1,
+        'converged': converged
+    }
+
+
+def multistage_compressor(qg,
+                         ps,
+                         Ts,
+                         ec,
+                         C,
+                         gamma_g,
+                         co2_percent,
+                         n2_percent,
+                         h2s_percent,
+                         h2o_percent,
+                         final_pd,
+                         num_stages,
+                         deltacp_list=None,
+                         Tpc_override=None,
+                         Ppc_override=None,
+                         component=None):
+    """
+    Calculate the total horsepower required for multistage gas compression.
+    
+    This function computes the horsepower for each compression stage, where each
+    stage uses the discharge conditions of the previous stage as its suction conditions.
+    The function automatically calculates the optimal pressure ratio distribution
+    across stages and prompts for deltacp correction factors for each stage.
+    
+    Args:
+        qg (float): Gas flow rate at standard conditions in MMSCF/D.
+        ps (float): Initial suction pressure at first stage inlet in psia.
+        Ts (float): Initial suction temperature at first stage inlet in °F.
+        ec (float): Compressor mechanical efficiency as decimal (0.80-0.95).
+        C (float): Clearance coefficient (0.03-0.10), typically 0.05.
+        gamma_g (float): Gas specific gravity (relative to air, typically 0.55-0.75).
+        co2_percent (float): Carbon dioxide mole percentage in gas.
+        n2_percent (float): Nitrogen mole percentage in gas.
+        h2s_percent (float): Hydrogen sulfide mole percentage in gas.
+        h2o_percent (float): Water vapor mole percentage in gas.
+        final_pd (float): Final discharge pressure after all stages in psia.
+        num_stages (int): Number of compression stages.
+        deltacp_list (list, optional): List of deltacp correction factors for each stage.
+            If None, will raise error with reduced properties for manual determination.
+        Tpc_override (float, optional): Override critical temperature in °R.
+        Ppc_override (float, optional): Override critical pressure in psia.
+        component (arraylike, optional): Component fractions [N2, CO2, H2S, C1-C7+].
+    
+    Returns:
+        dict: Dictionary containing:
+            - 'total_hp': Total horsepower for all stages in HP
+            - 'stage_results': List of dictionaries with results for each stage
+            - 'stage_pressures': List of pressures at each stage
+            - 'stage_temperatures': List of temperatures at each stage
+            - 'overall_compression_ratio': Total compression ratio
+            - 'stage_compression_ratio': Individual stage compression ratio
+    
+    Raises:
+        ValueError: If required parameters missing or calculations fail.
+    """
+    
+    print(f"\n{'='*60}")
+    print(f"MULTISTAGE COMPRESSOR ANALYSIS")
+    print(f"{'='*60}")
+    print(f"Number of stages: {num_stages}")
+    print(f"Initial suction pressure: {ps:.1f} psia")
+    print(f"Final discharge pressure: {final_pd:.1f} psia")
+    
+    # Calculate overall compression ratio and individual stage ratio
+    overall_ratio = final_pd / ps
+    stage_ratio = overall_ratio ** (1/num_stages)
+    
+    print(f"Overall compression ratio: {overall_ratio:.2f}")
+    print(f"Stage compression ratio: {stage_ratio:.2f}")
+    print(f"{'='*60}")
+    
+    # Initialize storage for results
+    stage_results = []
+    stage_pressures = [ps]  # Start with initial suction pressure
+    stage_temperatures = [Ts]  # Start with initial suction temperature
+    total_hp = 0
+    
+    # Process each compression stage
+    current_ps = ps
+    current_Ts = Ts
+    
+    for stage in range(num_stages):
+        print(f"\nSTAGE {stage + 1} ANALYSIS:")
+        print(f"{'='*40}")
+        
+        # Calculate discharge pressure for this stage
+        current_pd = current_ps * stage_ratio
+        stage_pressures.append(current_pd)
+        
+        print(f"Stage {stage + 1} suction pressure: {current_ps:.1f} psia")
+        print(f"Stage {stage + 1} suction temperature: {current_Ts:.1f} °F")
+        print(f"Stage {stage + 1} discharge pressure: {current_pd:.1f} psia")
+        print(f"Stage {stage + 1} compression ratio: {stage_ratio:.2f}")
+        
+        # Calculate critical properties and reduced properties for this stage
+        print(f"\nCritical Properties Calculation for Stage {stage + 1}:")
+        
+        # Component property arrays
+        critical_pressures = [493, 1071, 1306, 668, 708, 616, 529, 551, 490, 489, 437, 332]
+        critical_temperatures = [227, 548, 672, 343, 550, 666, 735, 765, 829, 845, 913, 1070]
+        
+        # Determine critical properties
+        if component is not None:
+            Tpc = np.sum(np.array(critical_temperatures) * np.array(component))
+            Ppc = np.sum(np.array(critical_pressures) * np.array(component))
+            co2 = component[1]
+            h2s = component[2]
+        elif Tpc_override is not None and Ppc_override is not None:
+            Tpc = Tpc_override
+            Ppc = Ppc_override
+            co2 = co2_percent / 100
+            h2s = h2s_percent / 100
+        else:
+            Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2
+            Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2
+            co2 = co2_percent / 100
+            h2s = h2s_percent / 100
+        
+        # Apply Wichert-Aziz correction
+        correction_factor = 120 * ((co2 + h2s)**0.9 + (co2 + h2s)**1.6) + (h2s**0.5 + h2s**4)
+        Tpc_corr = Tpc - correction_factor
+        Ppc_corr = (Ppc * Tpc_corr) / (Tpc + h2s * (1-h2s) * correction_factor)
+        
+        # Calculate reduced properties for suction conditions
+        Ts_R = current_Ts + 459.67
+        Tr = Ts_R / Tpc_corr
+        Pr = current_ps / Ppc_corr
+        
+        print(f"Pseudo-critical temperature (Tpc): {Tpc_corr:.1f} °R")
+        print(f"Pseudo-critical pressure (Ppc): {Ppc_corr:.1f} psia")
+        print(f"Reduced temperature (Tr): {Tr:.3f}")
+        print(f"Reduced pressure (Pr): {Pr:.3f}")
+        
+        # Check if deltacp list is provided - stop execution if not
+        if deltacp_list is None:
+            print(f"\nFor Stage {stage + 1}, reduced properties:")
+            print(f"Tr = {Tr:.3f}, Pr = {Pr:.3f}")
+            raise ValueError(f"deltacp_list is required for multistage compression. "
+                           f"Please determine deltacp from reduced properties charts and "
+                           f"call the function with deltacp_list=[stage1_deltacp, stage2_deltacp, ...]")
+        
+        # Validate deltacp list length
+        if len(deltacp_list) != num_stages:
+            raise ValueError(f"deltacp_list must contain {num_stages} values, got {len(deltacp_list)}")
+        
+        # Get deltacp for this stage
+        deltacp = deltacp_list[stage]
+        
+        # Calculate horsepower for this stage
+        try:
+            stage_hp = calculate_compressor_stage_hp(
+                qg=qg,
+                ps=current_ps,
+                Ts=current_Ts,
+                ec=ec,
+                C=C,
+                gamma_g=gamma_g,
+                co2_percent=co2_percent,
+                n2_percent=n2_percent,
+                h2s_percent=h2s_percent,
+                h2o_percent=h2o_percent,
+                deltacp=deltacp,
+                pd=current_pd,
+                Tpc_override=Tpc_override,
+                Ppc_override=Ppc_override,
+                component=component,
+                return_all_vals=True
+            )
+            
+            # Extract results from stage calculation
+            hp, ev, pd_calc, R_calc, k, z1 = stage_hp
+            
+            # Store stage results
+            stage_result = {
+                'stage_number': stage + 1,
+                'suction_pressure': current_ps,
+                'discharge_pressure': current_pd,
+                'suction_temperature': current_Ts,
+                'compression_ratio': stage_ratio,
+                'horsepower': hp,
+                'volumetric_efficiency': ev,
+                'isentropic_exponent': k,
+                'suction_z_factor': z1,
+                'reduced_temperature': Tr,
+                'reduced_pressure': Pr,
+                'deltacp': deltacp
+            }
+            stage_results.append(stage_result)
+            
+            # Add to total horsepower
+            total_hp += hp
+            
+            print(f"\nStage {stage + 1} Results:")
+            print(f"Horsepower: {hp:.2f} HP")
+            print(f"Volumetric efficiency: {ev:.4f}")
+            print(f"Isentropic exponent (k): {k:.4f}")
+            
+            # Calculate discharge temperature for next stage suction
+            # Using isentropic relation: T2 = T1 * (P2/P1)^((k-1)/k)
+            discharge_temp_R = Ts_R * (current_pd / current_ps)**((k-1)/k)
+            discharge_temp_F = discharge_temp_R - 459.67
+            stage_temperatures.append(discharge_temp_F)
+            
+            print(f"Discharge temperature: {discharge_temp_F:.1f} °F")
+            
+            # Update conditions for next stage
+            current_ps = current_pd
+            current_Ts = discharge_temp_F
+            
+        except Exception as e:
+            print(f"Error calculating Stage {stage + 1}: {str(e)}")
+            raise
+    
+    # Final summary
+    print(f"\n{'='*60}")
+    print(f"MULTISTAGE COMPRESSOR SUMMARY")
+    print(f"{'='*60}")
+    print(f"Total horsepower required: {total_hp:.2f} HP")
+    print(f"Number of stages: {num_stages}")
+    print(f"Overall compression ratio: {overall_ratio:.2f}")
+    print(f"Individual stage ratio: {stage_ratio:.2f}")
+    
+    print(f"\nStage-by-Stage Summary:")
+    print(f"{'Stage':<6} {'Ps (psia)':<10} {'Pd (psia)':<10} {'Ts (°F)':<8} {'HP':<8} {'ηv':<6}")
+    print(f"{'-'*60}")
+    
+    for i, result in enumerate(stage_results):
+        stage_num = result['stage_number']
+        ps_stage = result['suction_pressure']
+        pd_stage = result['discharge_pressure']
+        ts_stage = result['suction_temperature']
+        hp_stage = result['horsepower']
+        ev_stage = result['volumetric_efficiency']
+        
+        print(f"{stage_num:<6} {ps_stage:<10.1f} {pd_stage:<10.1f} {ts_stage:<8.1f} {hp_stage:<8.1f} {ev_stage:<6.3f}")
+    
+    # Return comprehensive results
+    return {
+        'total_hp': total_hp,
+        'stage_results': stage_results,
+        'stage_pressures': stage_pressures,
+        'stage_temperatures': stage_temperatures,
+        'overall_compression_ratio': overall_ratio,
+        'stage_compression_ratio': stage_ratio,
+        'num_stages': num_stages,
+        'initial_conditions': {'pressure': ps, 'temperature': Ts},
+        'final_conditions': {'pressure': final_pd, 'temperature': stage_temperatures[-1]}
+    }
