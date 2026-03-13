@@ -848,40 +848,56 @@ def calculate_mud_weights(Pp,
 		- Function uses Mohr-Coulomb failure criterion for calculations
 		- If well_depth is not provided, mudweights will be [None, None, None]
 	"""
+	# Accept scalars or numpy arrays for all numeric inputs
+	Pp  = np.asarray(Pp,  dtype=float)
+	UCS = np.asarray(UCS, dtype=float)
+	wbo = np.asarray(wbo, dtype=float)
+	Ts  = np.asarray(Ts,  dtype=float)
+
 	if q is None:
 		if mu is None:
 			raise ValueError("Either q or mu must be provided.")
 		else:
+			mu  = np.asarray(mu, dtype=float)
 			phi = np.arctan(mu)
-			q = (1 + np.sin(phi)) / (1 - np.sin(phi))
-			# print(f"q = {q:.4f} calculated from mu = {mu:.4f}")
+			q   = (1 + np.sin(phi)) / (1 - np.sin(phi))
+	else:
+		q = np.asarray(q, dtype=float)
+
 	if sigmaHmax is None:
 		if SHmax is None:
 			raise ValueError("Either sigmaHmax or SHmax must be provided.")
 		else:
-			sigmaHmax = SHmax - Pp
+			sigmaHmax = np.asarray(SHmax, dtype=float) - Pp
+	else:
+		sigmaHmax = np.asarray(sigmaHmax, dtype=float)
 
 	if sigmahmin is None:
 		if Shmin is None:
 			raise ValueError("Either sigmahmin or Shmin must be provided.")
 		else:
-			sigmahmin = Shmin - Pp
+			sigmahmin = np.asarray(Shmin, dtype=float) - Pp
+	else:
+		sigmahmin = np.asarray(sigmahmin, dtype=float)
 
-	P_breakout = (Pp + (sigmaHmax + sigmahmin - 2 * (sigmaHmax-sigmahmin)
+	P_breakout = (Pp + (sigmaHmax + sigmahmin - 2 * (sigmaHmax - sigmahmin)
 					    * np.cos(np.pi - np.radians(wbo)) - UCS) / (1 + q))
-	
+
 	P_shear = Pp + (3 * sigmaHmax - sigmahmin - UCS) / (1 + q)
 
 	P_tensile = Pp + 3 * sigmahmin - sigmaHmax + Ts
-	# Convert pressures to ppg (assuming pressure in psi and depth in feet)
-	ppg_breakout = P_breakout * 8.3 / 0.44 / well_depth if well_depth is not None else None
-	ppg_shear = P_shear * 8.3 / 0.44 / well_depth if well_depth is not None else None
-	ppg_tensile = P_tensile * 8.3 / 0.44 / well_depth if well_depth is not None else None
+
+	if well_depth is not None:
+		well_depth   = np.asarray(well_depth, dtype=float)
+		ppg_breakout = P_breakout * 8.33 / 0.433 / well_depth
+		ppg_shear    = P_shear    * 8.33 / 0.433 / well_depth
+		ppg_tensile  = P_tensile  * 8.33 / 0.433 / well_depth
+		mudweights = [ppg_breakout, ppg_shear, ppg_tensile]
+	else:
+		mudweights = [None, None, None]
+		print("Well depth not provided; mud weights in ppg not calculated.")
 
 	pressures = [P_breakout, P_shear, P_tensile]
-	mudweights = [ppg_breakout, ppg_shear, ppg_tensile] if well_depth is not None else [None, None, None]
-	if well_depth is None:
-		print("Well depth not provided; mud weights in ppg not calculated.")
 	return pressures, mudweights
 def create_stress_log(depth, density, sv, dt_shear, dt_comp, e_static_prime, 
                       shmin, shmax, title='Stress Log - Lost Hills Well', figsize=(15, 10)):

@@ -576,14 +576,12 @@ def calculate_compressor_stage_hp(qg,
         # Use manually specified critical properties
         Tpc = Tpc_override
         Ppc = Ppc_override
-        print(f"Using override critical properties: Tpc = {Tpc:.1f} °R, Ppc = {Ppc:.1f} psia")
     else:
         # Calculate using gas specific gravity correlations
         Tpc = 169.2 + 349.5*gamma_g - 74*gamma_g**2
         Ppc = 756.8 - 131*gamma_g - 3.6*gamma_g**2
         co2 = co2_percent / 100
         h2s = h2s_percent / 100
-        print(f"Using calculated critical properties: Tpc = {Tpc:.1f} °R, Ppc = {Ppc:.1f} psia")
     
     # Apply Wichert-Aziz correction for sour gas components
     correction_factor = 120 * ((co2 + h2s)**0.9 + (co2 + h2s)**1.6) + (h2s**0.5 + h2s**4)
@@ -595,7 +593,6 @@ def calculate_compressor_stage_hp(qg,
     # Calculate pseudo-reduced properties for diagnostics
     Tr = Ts / Tpc
     Pr = ps / Ppc
-    print(f"Corrected Tr: {Tr:.3f}, Corrected Pr: {Pr:.3f}")
 
     # ===== Z-FACTOR CALCULATION METHODS =====
     from utpgetools.utilities_package import gas_properties_calculation
@@ -674,13 +671,10 @@ def calculate_compressor_stage_hp(qg,
         # Validate result quality
         if np.isnan(z1) or np.iscomplexobj(z1):
             raise ValueError(f"Primary z1 calculation returned invalid result: {z1}")
-            
-        print(f"Using primary z1-factor calculation (suction): {z1:.4f}")
         
     except (TypeError, ValueError) as e:
         # Fallback method: Standing-Katz correlation
         if "complex" in str(e).lower() or "invalid result" in str(e).lower():
-            print("Primary z1-factor calculation failed, using Standing-Katz fallback method...")
             z1 = calculate_z_factor_standing_katz(ps, Ts, Tpc, Ppc)
             
             # Validate fallback result
@@ -688,8 +682,6 @@ def calculate_compressor_stage_hp(qg,
                 raise ValueError(f"Both primary and Standing-Katz z1 calculations failed. "
                                f"Gas specific gravity ({gamma_g:.3f}) may be outside valid range. "
                                f"Typical natural gas range: 0.55-0.75")
-            
-            print(f"Standing-Katz z1-factor (suction): {z1:.4f}")
         else:
             raise e
 
@@ -710,7 +702,6 @@ def calculate_compressor_stage_hp(qg,
         print("Please provide cp correction factor")
         return
     cp = cpst + deltacp
-    print(f"cpst = {cpst:.4f} Btu/lb-R, cp corrected = {cp:.4f} Btu/lb-R")
     
     # Calculate isentropic exponent
     k = cp / (cp - 1.986)  # 1.986 = universal gas constant in Btu/lb-mole-R / molecular weight
@@ -733,13 +724,10 @@ def calculate_compressor_stage_hp(qg,
         # Validate result quality
         if np.isnan(z2) or np.iscomplexobj(z2):
             raise ValueError(f"Primary z2 calculation returned invalid result: {z2}")
-            
-        print(f"Using primary z2-factor calculation (discharge): {z2:.4f}")
         
     except (TypeError, ValueError) as e:
         # Fallback method for discharge conditions
         if "complex" in str(e).lower() or "invalid result" in str(e).lower():
-            print("Primary z2-factor calculation failed, using Standing-Katz fallback method...")
             z2 = calculate_z_factor_standing_katz(pd, Td, Tpc, Ppc)
             
             # Validate fallback result
@@ -748,8 +736,6 @@ def calculate_compressor_stage_hp(qg,
                                f"Discharge conditions: P={pd:.1f} psia, T={Td-459.67:.1f}°F. "
                                f"Gas specific gravity ({gamma_g:.3f}) may be outside valid range. "
                                f"Consider using more realistic gas properties or different correlations.")
-            
-            print(f"Standing-Katz z2-factor (discharge): {z2:.4f}")
         else:
             raise e
 
@@ -766,8 +752,6 @@ def calculate_compressor_stage_hp(qg,
     P = 0.08584 * (k/(k-1)) * Ts * ((pd/ps)**(z1*(k-1)/k) - 1) * qg / ec / ev
 
     # ===== FINAL RESULT VALIDATION =====
-    # Print final reduced properties for deltacp correction factor reference
-    print(f"Final reduced properties for deltacp reference: Tr = {Tr:.3f}, Pr = {Pr:.3f}")
     
     # Ensure all results are physically meaningful
     if np.isnan(P) or np.iscomplexobj(P):
@@ -1006,21 +990,22 @@ def gas_properties(temperature_f, pressure_psi, composition_fractions, z_factor)
     molecular_weights = {
         'N2': 28.014, 'CO2': 44.010, 'H2S': 34.082, 'C1': 16.043,
         'C2': 30.070, 'C3': 44.097, 'iC4': 58.124, 'nC4': 58.124,
-        'iC5': 72.151, 'nC5': 72.151, 'C6': 86.178, 'C7+': 100.20
+        'iC5': 72.151, 'nC5': 72.151, 'C6': 86.178, 'C7+': 128.26
     }
     
     components = ['N2', 'CO2', 'H2S', 'C1', 'C2', 'C3', 'iC4', 'nC4', 'iC5', 'nC5', 'C6', 'C7+']
     
     # Calculate apparent molecular weight of gas mixture
     Ma = sum(xi * molecular_weights[comp] for xi, comp in zip(composition_fractions, components))
-    
+    # print(f"Apparent Molecular Weight: {Ma:.3f} g/mol")
     # Calculate specific gravity of gas (relative to air, MW = 28.97)
     gamma_g = Ma / 28.97
     
     # Calculate gas density using real gas equation of state
     # ρ = PM/(zRT) where R = 10.73 psia·ft³/(lb-mol·°R)
     rho_g = pressure_psi * Ma / (10.73 * T_R * z_factor)  # lb/ft³
-    
+    print(f"Temperature Rankine : {T_R:.2f} °R")
+    # print(f"Calculated Gas Density: {rho_g:.3f} lb/ft³")
     # Lee-Gonzalez-Eakin correlation for viscosity
     # Select correlation constants based on gas specific gravity
     if gamma_g <= 0.681:
@@ -1038,12 +1023,7 @@ def gas_properties(temperature_f, pressure_psi, composition_fractions, z_factor)
     mu_micropoise = A * math.exp(B * (rho_g / 62.4)**C)
     mu_cp = mu_micropoise / 10000  # Convert μP to cp
     
-    # Print detailed calculation results for verification
-    print(f"Gas Properties Calculation Results:")
-    print(f"  Temperature: {temperature_f:.1f} °F ({T_R:.1f} °R)")
-    print(f"  Pressure: {pressure_psi:.1f} psia")
-    print(f"  Z-factor: {z_factor:.4f}")
-    print(f"  Molecular weight: {Ma:.2f} g/mol")
+    # Calculate detailed properties for return
     print(f"  Specific gravity: {gamma_g:.4f}")
     print(f"  Density: {rho_g:.3f} lb/ft³")
     print(f"  Lee-Gonzalez-Eakin coefficients:")
@@ -1139,9 +1119,7 @@ def hall_yarborough_z_factor(reduced_pressure, reduced_temperature, tolerance=1e
     iteration = 0
     converged = False
     
-    print(f"Hall-Yarborough Z-factor Calculation:")
-    print(f"  Pr = {Pr:.4f}, Tr = {Tr:.4f}")
-    print(f"  Coefficients: A={A:.6f}, B={B:.4f}, C={C:.4f}, D={D:.4f}")
+    # Hall-Yarborough Z-factor Calculation with coefficients A, B, C, D
     
     while iteration < max_iterations:
         # Calculate function F(y) and its derivative F'(y)
@@ -1290,7 +1268,7 @@ def hall_yarborough(gamma_g, pressure, temperature, composition_fractions,
         Tpc = sum(xi * critical_properties[comp][0] for xi, comp in zip(composition_fractions, components))
         Ppc = sum(xi * critical_properties[comp][1] for xi, comp in zip(composition_fractions, components))
         
-        print(f"Component-by-component pseudo-critical properties:")
+
         print(f"  Tpc = {Tpc:.2f} °R, Ppc = {Ppc:.1f} psia")
         
         # Extract acid gas fractions from composition if not provided
@@ -1330,8 +1308,6 @@ def hall_yarborough(gamma_g, pressure, temperature, composition_fractions,
     
     # ===== HALL-YARBOROUGH CALCULATION =====
     print(f"Hall-Yarborough Z-factor Calculation:")
-    print(f"  Pr = {Pr:.4f}, Tr = {Tr:.4f}")
-    
     # Hall-Yarborough correlation constants
     t = 1.0 / Tr
     
@@ -1440,7 +1416,9 @@ def multistage_compressor(qg,
                          deltacp_list=None,
                          Tpc_override=None,
                          Ppc_override=None,
-                         component=None):
+                         component=None,
+                         compression_ratio_override=None,
+                         verbose=True):
     """
     Calculate the total horsepower required for multistage gas compression.
     
@@ -1467,6 +1445,9 @@ def multistage_compressor(qg,
         Tpc_override (float, optional): Override critical temperature in °R.
         Ppc_override (float, optional): Override critical pressure in psia.
         component (arraylike, optional): Component fractions [N2, CO2, H2S, C1-C7+].
+        compression_ratio_override (float, optional): Override individual stage compression ratio.
+            If provided, this ratio will be used for each stage instead of calculating from final_pd.
+        verbose (bool, optional): If True (default), print detailed analysis. If False, minimal output.
     
     Returns:
         dict: Dictionary containing:
@@ -1481,20 +1462,25 @@ def multistage_compressor(qg,
         ValueError: If required parameters missing or calculations fail.
     """
     
-    print(f"\n{'='*60}")
-    print(f"MULTISTAGE COMPRESSOR ANALYSIS")
-    print(f"{'='*60}")
-    print(f"Number of stages: {num_stages}")
-    print(f"Initial suction pressure: {ps:.1f} psia")
-    print(f"Final discharge pressure: {final_pd:.1f} psia")
-    
     # Calculate overall compression ratio and individual stage ratio
-    overall_ratio = final_pd / ps
-    stage_ratio = overall_ratio ** (1/num_stages)
+    if compression_ratio_override is not None:
+        # Use provided compression ratio for each stage
+        stage_ratio = compression_ratio_override
+        overall_ratio = stage_ratio ** num_stages
+        # Update final pressure based on override
+        final_pd = ps * overall_ratio
+    else:
+        # Calculate ratios based on final discharge pressure
+        overall_ratio = final_pd / ps
+        stage_ratio = overall_ratio ** (1/num_stages)
     
-    print(f"Overall compression ratio: {overall_ratio:.2f}")
-    print(f"Stage compression ratio: {stage_ratio:.2f}")
-    print(f"{'='*60}")
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"MULTISTAGE COMPRESSOR ANALYSIS")
+        print(f"{'='*60}")
+        print(f"Stages: {num_stages} | Ps: {ps:.1f} psia | Pd: {final_pd:.1f} psia")
+        print(f"Overall ratio: {overall_ratio:.2f} | Stage ratio: {stage_ratio:.2f}")
+        print(f"{'='*60}")
     
     # Initialize storage for results
     stage_results = []
@@ -1507,20 +1493,12 @@ def multistage_compressor(qg,
     current_Ts = Ts
     
     for stage in range(num_stages):
-        print(f"\nSTAGE {stage + 1} ANALYSIS:")
-        print(f"{'='*40}")
-        
         # Calculate discharge pressure for this stage
         current_pd = current_ps * stage_ratio
         stage_pressures.append(current_pd)
         
-        print(f"Stage {stage + 1} suction pressure: {current_ps:.1f} psia")
-        print(f"Stage {stage + 1} suction temperature: {current_Ts:.1f} °F")
-        print(f"Stage {stage + 1} discharge pressure: {current_pd:.1f} psia")
-        print(f"Stage {stage + 1} compression ratio: {stage_ratio:.2f}")
-        
-        # Calculate critical properties and reduced properties for this stage
-        print(f"\nCritical Properties Calculation for Stage {stage + 1}:")
+        if verbose:
+            print(f"\nSTAGE {stage + 1}: Ps={current_ps:.1f} psia, Pd={current_pd:.1f} psia, Ts={current_Ts:.1f}°F")
         
         # Component property arrays
         critical_pressures = [493, 1071, 1306, 668, 708, 616, 529, 551, 490, 489, 437, 332]
@@ -1553,22 +1531,19 @@ def multistage_compressor(qg,
         Tr = Ts_R / Tpc_corr
         Pr = current_ps / Ppc_corr
         
-        print(f"Pseudo-critical temperature (Tpc): {Tpc_corr:.1f} °R")
-        print(f"Pseudo-critical pressure (Ppc): {Ppc_corr:.1f} psia")
-        print(f"Reduced temperature (Tr): {Tr:.3f}")
-        print(f"Reduced pressure (Pr): {Pr:.3f}")
-        
-        # Check if deltacp list is provided - stop execution if not
-        if deltacp_list is None:
-            print(f"\nFor Stage {stage + 1}, reduced properties:")
-            print(f"Tr = {Tr:.3f}, Pr = {Pr:.3f}")
-            raise ValueError(f"deltacp_list is required for multistage compression. "
-                           f"Please determine deltacp from reduced properties charts and "
-                           f"call the function with deltacp_list=[stage1_deltacp, stage2_deltacp, ...]")
-        
-        # Validate deltacp list length
-        if len(deltacp_list) != num_stages:
-            raise ValueError(f"deltacp_list must contain {num_stages} values, got {len(deltacp_list)}")
+        # Check if deltacp list is provided and has enough values for current stage
+        if deltacp_list is None or len(deltacp_list) <= stage:
+            print(f"Stage {stage + 1} reduced properties: Tr={Tr:.3f}, Pr={Pr:.3f}")
+            
+            if deltacp_list is None:
+                raise ValueError(f"deltacp_list is required. Please determine deltacp for Stage {stage + 1} "
+                               f"from reduced properties chart (Tr={Tr:.3f}, Pr={Pr:.3f}) and "
+                               f"provide deltacp_list=[deltacp_stage1, ...]")
+            else:
+                raise ValueError(f"deltacp_list needs deltacp for Stage {stage + 1}. "
+                               f"Current list has {len(deltacp_list)} values, need at least {stage + 1}. "
+                               f"Stage {stage + 1}: Tr={Tr:.3f}, Pr={Pr:.3f}. "
+                               f"Add deltacp for this stage to your list.")
         
         # Get deltacp for this stage
         deltacp = deltacp_list[stage]
@@ -1617,49 +1592,37 @@ def multistage_compressor(qg,
             # Add to total horsepower
             total_hp += hp
             
-            print(f"\nStage {stage + 1} Results:")
-            print(f"Horsepower: {hp:.2f} HP")
-            print(f"Volumetric efficiency: {ev:.4f}")
-            print(f"Isentropic exponent (k): {k:.4f}")
-            
             # Calculate discharge temperature for next stage suction
             # Using isentropic relation: T2 = T1 * (P2/P1)^((k-1)/k)
             discharge_temp_R = Ts_R * (current_pd / current_ps)**((k-1)/k)
             discharge_temp_F = discharge_temp_R - 459.67
             stage_temperatures.append(discharge_temp_F)
             
-            print(f"Discharge temperature: {discharge_temp_F:.1f} °F")
+            if verbose:
+                print(f"Results: HP={hp:.2f}, ηv={ev:.4f}, k={k:.4f}, Td={discharge_temp_F:.1f}°F")
             
             # Update conditions for next stage
             current_ps = current_pd
             current_Ts = discharge_temp_F
             
         except Exception as e:
-            print(f"Error calculating Stage {stage + 1}: {str(e)}")
+            if verbose:
+                print(f"Error in Stage {stage + 1}: {str(e)}")
             raise
     
     # Final summary
-    print(f"\n{'='*60}")
-    print(f"MULTISTAGE COMPRESSOR SUMMARY")
-    print(f"{'='*60}")
-    print(f"Total horsepower required: {total_hp:.2f} HP")
-    print(f"Number of stages: {num_stages}")
-    print(f"Overall compression ratio: {overall_ratio:.2f}")
-    print(f"Individual stage ratio: {stage_ratio:.2f}")
-    
-    print(f"\nStage-by-Stage Summary:")
-    print(f"{'Stage':<6} {'Ps (psia)':<10} {'Pd (psia)':<10} {'Ts (°F)':<8} {'HP':<8} {'ηv':<6}")
-    print(f"{'-'*60}")
-    
-    for i, result in enumerate(stage_results):
-        stage_num = result['stage_number']
-        ps_stage = result['suction_pressure']
-        pd_stage = result['discharge_pressure']
-        ts_stage = result['suction_temperature']
-        hp_stage = result['horsepower']
-        ev_stage = result['volumetric_efficiency']
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"TOTAL HORSEPOWER: {total_hp:.2f} HP")
+        print(f"{'='*60}")
         
-        print(f"{stage_num:<6} {ps_stage:<10.1f} {pd_stage:<10.1f} {ts_stage:<8.1f} {hp_stage:<8.1f} {ev_stage:<6.3f}")
+        print(f"{'Stage':<6} {'Ps':<8} {'Pd':<8} {'Ts':<6} {'HP':<8} {'ηv':<6}")
+        print(f"{'-'*50}")
+        
+        for result in stage_results:
+            print(f"{result['stage_number']:<6} {result['suction_pressure']:<8.1f} "
+                  f"{result['discharge_pressure']:<8.1f} {result['suction_temperature']:<6.1f} "
+                  f"{result['horsepower']:<8.1f} {result['volumetric_efficiency']:<6.3f}")
     
     # Return comprehensive results
     return {
