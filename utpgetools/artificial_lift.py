@@ -228,144 +228,322 @@ def VLP(
         # Run for each flowrate sequentially to get VLP curve
         bhp_list = [vlp_single(rateSTB) for rateSTB in flowrate_range_stb_per_day]
         return np.array(flowrate_range_stb_per_day), np.array(bhp_list)
-def IPR(q_test=None, p_test=None, p_res=None, pwf=None, J=None, p_b=None, show_plot=False, plot_mode='overlay', constant_J=True):
+def IPR(q_test=None, p_test=None, p_res=None, pwf=None, J=None, p_b=None,
+        method='vogel',
+        v=None, Lm=None, d_ti=None, e=1.0, mu_o=None, API=None, T_res=None,
+        show_plot=False, plot_mode='overlay', constant_J=True):
     """
-    Calculates the Inflow Performance Relationship (IPR) for a well, estimating the production rate based on reservoir and well parameters.
-    This function adapts to both below- and above-bubble point conditions, providing a versatile tool for artificial lift and reservoir engineering analysis.
-    
+    Calculates the Inflow Performance Relationship (IPR) for a well using one of four
+    industry-standard models: Vogel, Cheng, Retnanto & Economides, or Bendakhlia & Aziz.
+
+    All composite models apply a linear (Darcy) IPR above the bubble point and the selected
+    two-phase correlation below it. When p_res < p_b (fully two-phase reservoir), all methods
+    fall back to the standard Vogel two-phase form using the test data.
+
     Parameters:
     -----------
     q_test : array-like or scalar
-        Well test flowrate data (STB/D). If array, must have same length as p_test and p_res.
+        Well test flowrate data (STB/D). Must match p_test and p_res in length.
     p_test : array-like or scalar
-        Well test pressure data (psi). If array, must have same length as q_test and p_res.
+        Well test flowing bottomhole pressure (psi). Must match q_test and p_res in length.
     p_res : array-like or scalar
-        Reservoir pressure(s) (psi). If array, must have same length as q_test and p_test.
-        Each reservoir pressure is associated with the corresponding well test data.
+        Static reservoir pressure(s) (psi). Each entry corresponds to a test point.
     pwf : array-like or scalar
-        Wellbore flowing pressure(s) for IPR calculation (psi).
+        Wellbore flowing pressure(s) at which to evaluate the IPR (psi).
     J : scalar, optional
-        Productivity index. If provided, overrides calculation from test data.
+        Productivity index (STB/day/psi). Overrides calculation from test data when provided.
     p_b : scalar
         Bubble point pressure (psi).
+    method : str, default 'vogel'
+        IPR correlation to apply below the bubble point. Options:
+
+        ``'vogel'``
+            Composite Vogel (Standing 1971). Below p_b::
+
+                q = q_b + (J·p_b / 1.8) · [1 − 0.2·(pwf/p_b) − 0.8·(pwf/p_b)²]
+
+        ``'cheng'``
+            Composite Cheng (1990). Coefficients a=0.9885, b=0.2055, c=1.1818.
+            Below p_b::
+
+                q = q_b + (J·p_b / (2c − b)) · [a + b·(pwf/p_b) − c·(pwf/p_b)²]
+
+            Denominator (2c − b = 2.1581) ensures slope continuity at p_b.
+
+        ``'retnanto_economides'`` or ``'re'``
+            Composite Retnanto & Economides (1998). Exponent n_hv is computed
+            from p_b (the effective "reservoir pressure" for the two-phase zone)::
+
+                n_hv = 0.23 · (4 + 1.66×10⁻³·p_b)
+
+            Below p_b::
+
+                q = q_b + (J·p_b / (0.75·n_hv + 0.25)) · [1 − 0.25·(pwf/p_b) − 0.75·(pwf/p_b)^n_hv]
+
+            No extra parameters required.
+
+        ``'bendakhlia_aziz'`` or ``'ba'``
+            Composite Bendakhlia & Aziz. Parameter v controls curvature (0 = linear,
+            1 = most concave). Below p_b::
+
+                q = q_b + (J·p_b / (1 + v)) · [1 − (1−v)·(pwf/p_b) − v·(pwf/p_b)²]
+
+            Provide ``v`` directly **or** supply ``Lm``, ``d_ti``, and viscosity
+            (``mu_o`` or ``API`` + ``T_res``) for automatic calculation::
+
+                n_hv = (Lm^1.8 · e^0.9) / (mu_o · d_ti²)
+                v    = 0.65 · (1 − exp(−3·n_hv / 1750))
+
+    v : float, optional
+        Bendakhlia-Aziz v parameter (0–1). When provided, overrides the automatic
+        computation from well geometry for ``method='bendakhlia_aziz'``.
+    Lm : float, optional
+        Equivalent drainage / lateral length (ft). Required for B&A v computation
+        unless ``v`` is given directly.
+    d_ti : float, optional
+        Tubing inner diameter (in). Required for B&A v computation unless ``v`` is given.
+    e : float, default 1.0
+        Perforation / completion efficiency (0–1). Used in the B&A n_hv formula.
+    mu_o : float, optional
+        Dead-oil viscosity at reservoir conditions (cp). Used for B&A v computation.
+        If omitted, estimated from ``API`` and ``T_res`` via the Beal correlation.
+    API : float, optional
+        Oil API gravity. Used with ``T_res`` to estimate ``mu_o`` for B&A.
+    T_res : float, optional
+        Reservoir temperature (°F). Used with ``API`` to estimate ``mu_o`` for B&A.
     show_plot : bool, default False
-        Whether to display IPR plots.
+        If True, display the IPR curve(s).
     plot_mode : str, default 'overlay'
-        Plot mode: 'overlay' or 'separate'.
+        ``'overlay'`` — all curves on one axes; ``'separate'`` — one figure per curve.
     constant_J : bool, default True
-        Whether to use constant productivity index across different reservoir pressures.
-        If True, uses J from first test point for all reservoir pressures.
-        If False, calculates J individually for each reservoir pressure using its corresponding test data.
-    
+        If True, compute J from the first test point and apply it to all reservoir
+        pressures. If False, compute J from each test point individually.
+
     Returns:
     --------
-    array or list of arrays
-        Flow rates corresponding to input pwf values.
-        
+    numpy.ndarray or list of numpy.ndarray
+        Flow rate(s) in STB/D corresponding to ``pwf``. Returns a list when multiple
+        reservoir pressures are supplied, otherwise a single array.
+
     Raises:
     -------
     ValueError
-        If the number of well tests doesn't match the number of reservoir pressures,
-        or if q_test and p_test have different shapes.
-    
+        If inputs are inconsistently shaped, or if required B&A parameters are missing.
+
     Examples:
     ---------
-    # Single test point and reservoir pressure
-    IPR(q_test=100, p_test=2000, p_res=3000, pwf=np.linspace(0, 3000, 100), p_b=1800)
-    
-    # Multiple test points, each associated with a reservoir pressure
-    q_tests = [80, 120, 150]  # STB/D
-    p_tests = [2200, 1800, 1500]  # psi  
-    p_res = [2800, 3000, 3200]  # psi - each corresponds to a test point
-    IPR(q_test=q_tests, p_test=p_tests, p_res=p_res, pwf=np.linspace(0, 3000, 100), p_b=1800)
+    Single well test, Vogel (default)::
+
+        q = IPR(q_test=250, p_test=3500, p_res=5400, p_b=4200,
+                pwf=np.linspace(0, 5400, 500))
+
+    Cheng correlation::
+
+        q = IPR(q_test=250, p_test=3500, p_res=5400, p_b=4200,
+                pwf=np.linspace(0, 5400, 500), method='cheng')
+
+    Bendakhlia & Aziz (v supplied directly)::
+
+        q = IPR(q_test=250, p_test=3500, p_res=5400, p_b=4200,
+                pwf=np.linspace(0, 5400, 500), method='bendakhlia_aziz', v=0.55)
+
+    Bendakhlia & Aziz (v computed from well geometry)::
+
+        q = IPR(q_test=250, p_test=3500, p_res=5400, p_b=4200,
+                pwf=np.linspace(0, 5400, 500), method='ba',
+                Lm=12100, d_ti=2.441, API=47.5, T_res=171.0)
     """
     import numpy as np
 
-    # Convert inputs to arrays
+    method = method.lower().strip()
+    valid_methods = ('vogel', 'cheng', 'retnanto_economides', 're', 'bendakhlia_aziz', 'ba')
+    if method not in valid_methods:
+        raise ValueError(f"method must be one of {valid_methods}, got '{method}'")
+
+    # ── Bendakhlia-Aziz v parameter ───────────────────────────────────────────
+    v_ba = None
+    if method in ('bendakhlia_aziz', 'ba'):
+        if v is not None:
+            v_ba = float(v)
+            console.print(f"[bright_cyan]B&A v (user-supplied)[/bright_cyan] = [bright_red]{v_ba:.4f}[/bright_red]")
+        else:
+            # Compute mu_o via Beal correlation if not provided directly
+            mu_o_val = mu_o
+            if mu_o_val is None:
+                if API is not None and T_res is not None:
+                    Zv = 3.0324 - 0.02023 * API
+                    y = 10.0 ** Zv
+                    x = y * (T_res ** -1.163)
+                    mu_o_val = max((10.0 ** x) - 1.0, 0.01)
+                else:
+                    raise ValueError(
+                        "For method='bendakhlia_aziz', supply 'v' directly, or provide "
+                        "'Lm', 'd_ti', and ('mu_o' or ('API' and 'T_res'))."
+                    )
+            if Lm is None or d_ti is None:
+                raise ValueError(
+                    "For method='bendakhlia_aziz', provide 'Lm' and 'd_ti' "
+                    "(or supply 'v' directly)."
+                )
+            n_hv_ba = (Lm ** 1.8 * e ** 0.9) / (mu_o_val * d_ti ** 2)
+            v_ba = 0.65 * (1.0 - np.exp(-3.0 * n_hv_ba / 1750.0))
+            console.print(f"[bright_cyan]B&A n_hv[/bright_cyan] = [bright_red]{n_hv_ba:.4f}[/bright_red]")
+            console.print(f"[bright_cyan]B&A v[/bright_cyan]    = [bright_red]{v_ba:.4f}[/bright_red]")
+
+    # ── Input validation and conversion ──────────────────────────────────────
     q_test_arr = np.asarray(q_test)
     p_test_arr = np.asarray(p_test)
-    pwf_arr = np.asarray(pwf)
-    
-    # Validate test data inputs
+    pwf_arr    = np.asarray(pwf)
+
     if q_test_arr.shape != p_test_arr.shape:
-        raise ValueError("q_test and p_test must have the same shape when both are arrays")
-    
-    # Ensure p_res is iterable and convert to array
+        raise ValueError("q_test and p_test must have the same shape")
+
     try:
-        p_res_arr = np.asarray(p_res)
+        p_res_arr  = np.asarray(p_res)
         p_res_list = list(p_res_arr)
     except TypeError:
-        p_res_arr = np.asarray([p_res])
+        p_res_arr  = np.asarray([p_res])
         p_res_list = [p_res]
-    
-    # Validate that well test data matches reservoir pressure data
+
     if q_test_arr.ndim > 0 and p_res_arr.ndim > 0:
         if len(q_test_arr) != len(p_res_arr):
-            raise ValueError(f"Number of well tests ({len(q_test_arr)}) must match number of reservoir pressures ({len(p_res_arr)})")
+            raise ValueError(
+                f"Number of well tests ({len(q_test_arr)}) must match "
+                f"number of reservoir pressures ({len(p_res_arr)})"
+            )
     elif q_test_arr.ndim > 0 or p_res_arr.ndim > 0:
-        # One is array, one is scalar - check if they're compatible
         if q_test_arr.ndim > 0 and len(q_test_arr) != len(p_res_list):
-            raise ValueError(f"Number of well tests ({len(q_test_arr)}) must match number of reservoir pressures ({len(p_res_list)})")
+            raise ValueError(
+                f"Number of well tests ({len(q_test_arr)}) must match "
+                f"number of reservoir pressures ({len(p_res_list)})"
+            )
         elif p_res_arr.ndim > 0 and len(p_res_list) > 1:
-            # Multiple reservoir pressures but single test point
-            raise ValueError(f"Single well test provided but multiple reservoir pressures ({len(p_res_list)}) given. Provide one test per reservoir pressure.")
+            raise ValueError(
+                f"Single well test provided but multiple reservoir pressures "
+                f"({len(p_res_list)}) given. Provide one test per reservoir pressure."
+            )
 
-    q_curves = []
-    
-    # Calculate J once if constant_J is True and J is None
+    # ── Productivity index ────────────────────────────────────────────────────
     J_fixed = None
     if constant_J and J is None:
-        # Use the first test point for constant J calculation
-        if q_test_arr.ndim == 0:  # scalar
-            J_fixed = q_test_arr / (p_res_list[0] - p_test_arr)
-        else:  # array - use first test point
+        if q_test_arr.ndim == 0:
+            J_fixed = float(q_test_arr) / (p_res_list[0] - float(p_test_arr))
+        else:
             J_fixed = q_test_arr[0] / (p_res_list[0] - p_test_arr[0])
-            
+
+    q_curves = []
     for i, pres in enumerate(p_res_list):
         if J is not None:
             J_val = J
         elif constant_J:
             J_val = J_fixed
         else:
-            # Use corresponding test data for this reservoir pressure
-            if q_test_arr.ndim == 0:  # scalar test data
-                q_test_val = q_test_arr
-                p_test_val = p_test_arr
-            else:  # array test data - use corresponding index
-                q_test_val = q_test_arr[i]
-                p_test_val = p_test_arr[i]
-            J_val = q_test_val / (pres - p_test_val)
-        
-        # Check if reservoir pressure is below bubble point
+            if q_test_arr.ndim == 0:
+                J_val = float(q_test_arr) / (pres - float(p_test_arr))
+            else:
+                J_val = q_test_arr[i] / (pres - p_test_arr[i])
+
         if pres >= p_b:
-            # Original behavior when reservoir pressure is above bubble point
+            # ── Composite IPR: linear above p_b, two-phase model below p_b ───
             qb = J_val * (pres - p_b)
-            qmax = qb / (1-0.2 * (p_b / pres) - 0.8 * (p_b / pres) ** 2)
-            console.print(f"\n[bright_cyan]qb[/bright_cyan] for [bright_cyan]p_res[/bright_cyan]={pres} psi: [bright_red]{qb:.2f}[/bright_red] STB/D")
-            console.print(f"[bright_cyan]qmax[/bright_cyan] for [bright_cyan]p_res[/bright_cyan]={pres} psi: [bright_red]{qmax:.2f}[/bright_red] STB/D")
-            q = np.where(
-                pwf_arr > p_b,
-                # qb + (J_val * p_b / 1.8) * (1 - 0.2 * pwf_arr / p_b - 0.8 * (pwf_arr / p_b) ** 2), # previous version
-                # qb / (1-0.2 * pwf_arr / p_b - 0.8 * (pwf_arr / p_b) ** 2), # testing new version
-                J_val * (pres - pwf_arr),
-                (1 - 0.2 * (pwf_arr / pres) - 0.8 * (pwf_arr / pres) ** 2) * qmax # revised version
+            console.print(
+                f"\n[bright_cyan]IPR method[/bright_cyan]: [bright_yellow]{method}[/bright_yellow]  |  "
+                f"[bright_cyan]p_res[/bright_cyan] = {pres} psi"
             )
+            console.print(f"[bright_cyan]q_b[/bright_cyan] = [bright_red]{qb:.2f}[/bright_red] STB/D")
+
+            if method == 'vogel':
+                # Composite Vogel (Standing 1971)
+                # Above p_b : q = J·(p_r − p_wf)
+                # Below p_b : q = q_b + (J·p_b/1.8)·[1 − 0.2·(pwf/p_b) − 0.8·(pwf/p_b)²]
+                # Denominator 1.8 = 0.2 + 2·0.8 ensures slope continuity at p_b
+                qmax = qb + J_val * p_b / 1.8
+                console.print(f"[bright_cyan]q_max[/bright_cyan] = [bright_red]{qmax:.2f}[/bright_red] STB/D")
+                q = np.where(
+                    pwf_arr >= p_b,
+                    J_val * (pres - pwf_arr),
+                    qb + (J_val * p_b / 1.8) * (
+                        1.0 - 0.2 * (pwf_arr / p_b) - 0.8 * (pwf_arr / p_b) ** 2
+                    )
+                )
+
+            elif method == 'cheng':
+                # Composite Cheng (1990)
+                # Coefficients: a = 0.9885, b = 0.2055, c = 1.1818
+                # Below p_b : q = q_b + (J·p_b/(2c−b))·[a + b·(pwf/p_b) − c·(pwf/p_b)²]
+                # Denominator (2c − b) = 2.1581 ensures slope continuity at p_b
+                a_ch, b_ch, c_ch = 0.9885, 0.2055, 1.1818
+                denom_ch = 2.0 * c_ch - b_ch          # 2.1581
+                qmax = qb + (J_val * p_b / denom_ch) * a_ch
+                console.print(f"[bright_cyan]q_max[/bright_cyan] = [bright_red]{qmax:.2f}[/bright_red] STB/D")
+                q = np.where(
+                    pwf_arr >= p_b,
+                    J_val * (pres - pwf_arr),
+                    qb + (J_val * p_b / denom_ch) * (
+                        a_ch + b_ch * (pwf_arr / p_b) - c_ch * (pwf_arr / p_b) ** 2
+                    )
+                )
+
+            elif method in ('retnanto_economides', 're'):
+                # Composite Retnanto & Economides (1998)
+                # In the composite IPR, the two-phase zone spans [0, p_b]. The effective
+                # "reservoir pressure" for that zone is p_b itself, so the normalised ratio
+                # in the n_hv quadratic is p_b/p_b = 1 (not p_r/p_b).  This collapses the
+                # quadratic to a constant and n_hv depends only on p_b:
+                #   n_hv = (−0.27 + 1.46 − 0.96) · (4 + 1.66×10⁻³·p_b)
+                #        = 0.23 · (4 + 1.66×10⁻³·p_b)
+                # Reference: Retnanto & Economides (1998); Economides et al. (2013).
+                # Below p_b : q = q_b + (J·p_b/(0.75·n+0.25))·[1 − 0.25·(pwf/p_b) − 0.75·(pwf/p_b)^n]
+                # Denominator (0.75·n + 0.25) ensures slope continuity at p_b.
+                n_hv = 0.23 * (4.0 + 1.66e-3 * p_b)
+                n_hv = max(n_hv, 0.01)               # guard against non-positive values
+                denom_re = 0.75 * n_hv + 0.25
+                qmax = qb + J_val * p_b / denom_re
+                console.print(f"[bright_cyan]R&E n_hv[/bright_cyan] = [bright_red]{n_hv:.4f}[/bright_red]")
+                console.print(f"[bright_cyan]q_max[/bright_cyan]    = [bright_red]{qmax:.2f}[/bright_red] STB/D")
+                q = np.where(
+                    pwf_arr >= p_b,
+                    J_val * (pres - pwf_arr),
+                    qb + (J_val * p_b / denom_re) * (
+                        1.0 - 0.25 * (pwf_arr / p_b) - 0.75 * (pwf_arr / p_b) ** n_hv
+                    )
+                )
+
+            else:  # bendakhlia_aziz / ba
+                # Composite Bendakhlia & Aziz
+                # Below p_b : q = q_b + (J·p_b/(1+v))·[1 − (1−v)·(pwf/p_b) − v·(pwf/p_b)²]
+                # Denominator (1 + v) ensures slope continuity at p_b
+                denom_ba = 1.0 + v_ba
+                qmax = qb + J_val * p_b / denom_ba
+                console.print(f"[bright_cyan]q_max[/bright_cyan] = [bright_red]{qmax:.2f}[/bright_red] STB/D")
+                q = np.where(
+                    pwf_arr >= p_b,
+                    J_val * (pres - pwf_arr),
+                    qb + (J_val * p_b / denom_ba) * (
+                        1.0 - (1.0 - v_ba) * (pwf_arr / p_b) - v_ba * (pwf_arr / p_b) ** 2
+                    )
+                )
+
         else:
-            # Use full two-phase Vogel IPR when reservoir pressure is below bubble point
-            if q_test_arr.ndim == 0:  # scalar test data
-                q_test_val = q_test_arr
-                p_test_val = p_test_arr
-            else:  # array test data - use corresponding index
+            # ── Fully two-phase reservoir (p_res < p_b): standard Vogel ──────
+            if q_test_arr.ndim == 0:
+                q_test_val = float(q_test_arr)
+                p_test_val = float(p_test_arr)
+            else:
                 q_test_val = q_test_arr[i]
                 p_test_val = p_test_arr[i]
-            
-            qmax = q_test_val / (1-0.2 * (p_test_val / pres) - 0.8 * (p_test_val / pres) ** 2)
-            console.print(f"Reservoir pressure below bubble point - using two-phase Vogel IPR")
-            console.print(f"[bright_cyan]qmax[/bright_cyan] for [bright_cyan]p_res[/bright_cyan]={pres} psi: [bright_red]{qmax:.2f}[/bright_red] STB/D")
-            q = (1 - 0.2 * (pwf_arr / pres) - 0.8 * (pwf_arr / pres) ** 2) * qmax
-                
-            
-        # If input was scalar, return scalar
+            qmax = q_test_val / (
+                1.0 - 0.2 * (p_test_val / pres) - 0.8 * (p_test_val / pres) ** 2
+            )
+            console.print(
+                f"Reservoir pressure below bubble point — using two-phase Vogel IPR"
+            )
+            console.print(
+                f"[bright_cyan]q_max[/bright_cyan] for [bright_cyan]p_res[/bright_cyan]={pres} psi: "
+                f"[bright_red]{qmax:.2f}[/bright_red] STB/D"
+            )
+            q = (1.0 - 0.2 * (pwf_arr / pres) - 0.8 * (pwf_arr / pres) ** 2) * qmax
+
         if np.isscalar(pwf):
             q = float(q)
         q_curves.append(q)
@@ -378,7 +556,7 @@ def IPR(q_test=None, p_test=None, p_res=None, pwf=None, J=None, p_b=None, show_p
                 plt.plot(np.array(q)[mask], pwf_arr[mask], label=f'p_res={p_res_list[i]}')
             plt.xlabel('q (STB/D)')
             plt.ylabel('pwf (psi)')
-            plt.title('Reservoir IPR')
+            plt.title(f'Reservoir IPR — {method}')
             plt.grid()
             plt.xlim(0)
             plt.ylim(0)
@@ -391,7 +569,7 @@ def IPR(q_test=None, p_test=None, p_res=None, pwf=None, J=None, p_b=None, show_p
                 plt.plot(np.array(q)[mask], pwf_arr[mask])
                 plt.xlabel('q (STB/D)')
                 plt.ylabel('pwf (psi)')
-                plt.title(f'Reservoir IPR (p_res={p_res_list[i]})')
+                plt.title(f'Reservoir IPR — {method}  (p_res={p_res_list[i]})')
                 plt.xlim(0)
                 plt.ylim(0)
                 plt.grid()

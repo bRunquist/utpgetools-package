@@ -1561,4 +1561,39 @@ def compressible_single_phase(
         }
     
     else:
-        raise ValueError(f"Invalid calculation_mode: {calculation_mode}")
+        raise ValueError(f"Invalid calculation_mode: {calculation_mode}")       
+
+
+def emulsion_viscosity(mu_o, f_w, a=5.5):
+    """
+    Calculate emulsion viscosity using the Richardson (1950) correlation.
+
+    This is the correlation implemented in the Utilities Package spreadsheet
+    (cell B39 formula: =B38*EXP(5*B36)*(1-3*B36+B37*B36^2)).
+
+    Formula:
+        mu_e = mu_o * exp(5 * f_w) * (1 - 3*f_w + a*f_w^2)
+
+    Args:
+        mu_o (float): Pure oil viscosity (cP).
+        f_w (float): Volume fraction of water in the emulsion (0–1).
+            For a water-in-oil emulsion entering a heater treater after the
+            FWKO, this is the residual water cut (e.g. 0.05 for 5%).
+        a (float, optional): Emulsion type parameter (dimensionless).
+            Default 5.5 corresponds to light crude / water-in-oil emulsions
+            typical of Wolfcamp B and similar paraffinic oils. Range: 3–10;
+            higher values indicate tighter emulsions.
+
+    Returns:
+        float: Emulsion viscosity in cP.
+
+    Example:
+        >>> mu_e = emulsion_viscosity(mu_o=3.145, f_w=0.1, a=5.5)
+        >>> print(f"{mu_e:.3f} cp")   # 3.915 cp  (matches spreadsheet)
+
+    References:
+        Richardson, E.G. (1950). Kolloid-Zeitschrift, 65, 32.
+        Arnold & Stewart, Surface Production Operations Vol. 1, Appendix B.
+    """
+    import numpy as np
+    return mu_o * np.exp(5.0 * f_w) * (1.0 - 3.0 * f_w + a * f_w ** 2)

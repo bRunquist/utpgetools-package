@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='utpgetools',
-    version='0.1.4',
+    version='0.1.4.1',
     packages=find_packages(),
     install_requires=['numpy','pandas','matplotlib','rich','scipy','scikit-learn','seaborn'],
     author='Brecken Runquist',
@@ -11,3 +11,4 @@ setup(
     license='Custom Academic Use License',
     python_requires='>=3.7' 
 )
+
